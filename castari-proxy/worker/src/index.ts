@@ -59,10 +59,10 @@ export default {
       }
 
       if (provider === 'anthropic') {
-        return proxyAnthropic(body, request, authHeader.value, config.anthropicBaseUrl);
+        return await proxyAnthropic(body, request, authHeader.value, config.anthropicBaseUrl);
       }
 
-      return handleOpenRouter({
+      return await handleOpenRouter({
         body,
         wireModel,
         originalModel,
@@ -159,11 +159,19 @@ async function handleOpenRouter(ctx: OpenRouterContext): Promise<Response> {
     return streamOpenRouterToAnthropic(upstreamResp, { originalModel: ctx.originalModel });
   }
 
-  const json = await upstreamResp.json();
-  if (!upstreamResp.ok) {
-    throw invalidRequest('OpenRouter error', { status: upstreamResp.status, body: json });
+  let json: unknown;
+  try {
+    json = await upstreamResp.json();
+  } catch {
+    const text = await upstreamResp.clone().text().catch(() => '<unreadable>');
+    throw invalidRequest('OpenRouter returned non-JSON response', { status: upstreamResp.status, body: text });
   }
-  const responseBody: AnthropicResponse = mapOpenRouterResponse(json, ctx.originalModel);
+
+  if (!upstreamResp.ok) {
+    throw invalidRequest('OpenRouter error', { status: upstreamResp.status, body: json as Record<string, unknown> });
+  }
+
+  const responseBody: AnthropicResponse = mapOpenRouterResponse(json as import('./types').OpenRouterResponse, ctx.originalModel);
   return new Response(JSON.stringify(responseBody), {
     status: 200,
     headers: {
