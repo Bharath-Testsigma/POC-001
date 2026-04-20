@@ -75,12 +75,30 @@ MAX_RETRIES=3
 ```
 
 ```bash
-# 3. Install dependencies and start the server
+# 3. Start the API server (Terminal 1)
 uv run main.py
 ```
 
 Server starts at `http://localhost:8000`.  
-Interactive API docs available at `http://localhost:8000/docs`.
+Interactive API docs: `http://localhost:8000/docs`
+
+```bash
+# 4. Launch the demo UI (Terminal 2)
+uv run streamlit run ui.py
+```
+
+Demo UI opens at `http://localhost:8501`.
+
+## Demo UI
+
+The Streamlit UI (`ui.py`) gives you a full interactive demo:
+
+- **Model selector** — switch between Gemini Flash, GPT-4o, Claude Sonnet, Mistral, Llama (free) per request without restarting
+- **One-click prompts** — pre-filled example queries to start demoing immediately
+- **Live cost comparison** — shows estimated cost for the exact call across all 8 models side-by-side after every generation
+- **XML viewer** — generated test case files with syntax highlighting
+- **Metrics bar** — workflow type, model used, tool calls made, retries, elapsed time
+- **Raw JSON panel** — full API response for debugging
 
 ## API Endpoints
 

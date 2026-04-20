@@ -66,6 +66,9 @@ def _collect_test_cases(written_files: set[str]) -> list[TestCase]:
 async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
     tracer = PortkeyTracer(trace_id=request.conversation_id)
 
+    # Per-request model override (from UI model selector)
+    active_model = request.model or settings.default_model
+
     system_prompt = build_system_prompt(request.app_type, request.existing_files)
     user_message = build_user_prompt(request.query)
 
@@ -81,11 +84,11 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
 
     while iteration < settings.max_iterations:
         iteration += 1
-        logger.info(f"[{request.conversation_id}] Iteration {iteration}")
+        logger.info(f"[{request.conversation_id}] Iteration {iteration} model={active_model}")
 
         try:
             response = await litellm.acompletion(
-                model=settings.default_model,
+                model=active_model,
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
                 tool_choice="auto",
@@ -93,7 +96,7 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                 api_key=settings.openrouter_api_key,
             )
         except Exception as primary_err:
-            logger.warning(f"Primary model failed: {primary_err}. Trying fallback.")
+            logger.warning(f"Model {active_model} failed: {primary_err}. Trying fallback.")
             try:
                 response = await litellm.acompletion(
                     model=settings.fallback_model,
@@ -103,11 +106,12 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                     api_base=settings.openrouter_api_base,
                     api_key=settings.openrouter_api_key,
                 )
+                active_model = settings.fallback_model
             except Exception as fallback_err:
                 raise RuntimeError(f"Both models failed. Primary: {primary_err}. Fallback: {fallback_err}")
 
         tracer.log_llm_call(
-            model=settings.default_model,
+            model=active_model,
             messages=messages,
             response=response,
         )
@@ -131,6 +135,7 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                 summary=parsed["summary"],
                 tool_calls_made=total_tool_calls,
                 retries=total_retries,
+                model_used=active_model,
             )
 
         # Execute each tool call
@@ -210,4 +215,5 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
         summary="Max iterations reached. Partial results returned.",
         tool_calls_made=total_tool_calls,
         retries=total_retries,
+        model_used=active_model,
     )

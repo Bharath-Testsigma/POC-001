@@ -7,6 +7,7 @@ class GenerateRequest(BaseModel):
     app_type: str = "web"
     conversation_id: str = Field(default_factory=lambda: str(uuid4()))
     existing_files: list[str] = []
+    model: str | None = None  # overrides DEFAULT_MODEL when set
 
 
 class TestCase(BaseModel):
@@ -23,6 +24,7 @@ class GenerateResponse(BaseModel):
     summary: str
     tool_calls_made: int
     retries: int
+    model_used: str = ""
 
 
 class WorkspaceFile(BaseModel):
