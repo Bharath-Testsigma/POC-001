@@ -1,6 +1,6 @@
-name = "castari-worker"
+name = "atto-proxy"
 main = "src/index.ts"
-account_id = "6444e0f9662766ec34cfeef001af3549"
+account_id = "bcd15df62c598430fe6693f984377ac6"
 workers_dev = true
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]

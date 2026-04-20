@@ -76,12 +76,12 @@ export function AttoChat() {
   const updateAssistantMessage = useCallback((updater: (cur: string) => string) => {
     setMessages((prev) => {
       const next = [...prev];
-      if (assistantIndexRef.current === null) {
+      if (assistantIndexRef.current === null || next[assistantIndexRef.current] === undefined) {
         assistantIndexRef.current = next.length;
         next.push({ id: crypto.randomUUID(), role: 'assistant', content: '' });
       }
       const idx = assistantIndexRef.current!;
-      next[idx] = { ...next[idx], content: updater(next[idx].content ?? '') };
+      next[idx] = { ...next[idx], content: updater(next[idx]?.content ?? '') };
       return next;
     });
   }, []);

@@ -1,65 +1,149 @@
-# Claude Agent Chat (Next.js + Claude Agent SDK)
+# Atto — AI Test Case Generator (Next.js App)
 
-Production-ready chat surface that hosts a Claude Agent SDK runtime with safe tool policies, streaming responses, transcript logging, and extensible MCP tooling.
+This is the main application. It uses the **Claude Agent SDK** with a self-hosted proxy to generate XML test case files from plain-English prompts, with support for any AI model — Claude, Gemini, GPT-4o, Llama, and more.
 
-## Features
-
-- **Claude Agent SDK integration** with curated tool policies, custom MCP server registry, and optional project instructions (CLAUDE.md) loading.
-- **Streaming JSON lines API** (`/api/chat`) that normalizes SDK messages into UI-friendly events and records them to local transcripts.
-- **Client-side chat UI** with partial response rendering, tool-mode toggles, image attachments (paste/drag/upload), project-instruction + extended-thinking controls, and reasoning/tool-call visualizations.
-- **Safety & persistence**: Filesystem jail enforcement, `.data/out` write sandbox, `.data/sessions` transcripts via hooks, and in-process MCP tooling.
-- **Testing & quality**: Vitest-based unit tests for policy and event mapping plus linting; production builds verified with `next build`.
-
-## Getting started
+## Quick Start
 
 ```bash
 npm install
-export ANTHROPIC_API_KEY=sk-ant-... # required at runtime
-export CASTARI_WORKER_URL=https://<worker-subdomain>.workers.dev # required to reach the Castari proxy
-# Required for OpenRouter models (default: or:gpt-5-mini)
-export OPENROUTER_API_KEY=sk-or-...
-export CASTARI_WORKER_TOKEN=shared-secret
-npm run dev
+cp .env.example .env.local   # fill in your keys (see below)
+npm run dev                  # http://localhost:3000
 ```
 
-Visit http://localhost:3000 to chat.
+## Environment Variables
 
-## Scripts
+```env
+# Required — get from console.anthropic.com
+ANTHROPIC_API_KEY=sk-ant-...
 
-| Command            | Description                                                 |
-| ------------------ | ----------------------------------------------------------- |
-| `npm run dev`      | Start Next.js in development mode.                          |
-| `npm run build`    | Production build (requires `ANTHROPIC_API_KEY` to be set).  |
-| `npm start`        | Launch the production server.                               |
-| `npm run lint`     | ESLint (Next.js base rules).                                |
-| `npm run test`     | Vitest unit tests (`tests/`).                               |
+# Required for non-Claude models — get from openrouter.ai/keys
+OPENROUTER_API_KEY=sk-or-v1-...
 
-## Configuration
+# Your deployed Cloudflare Worker URL (see worker/ README for how to deploy)
+CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
+```
 
-- `ANTHROPIC_API_KEY` – required for all SDK usage (still used for Anthropic models and by the Castari proxy).
-- `CASTARI_WORKER_URL` – required. Points to the deployed Castari Worker (`https://.../v1/messages`). Both `ANTHROPIC_BASE_URL` and `CASTARI_GATEWAY_URL` are derived from this.
-- `OPENROUTER_API_KEY` – required when using the default OpenRouter model (`or:gpt-5-mini`) or any `or:*`/`openrouter/*` model.
-- `CASTARI_WORKER_TOKEN` – optional shared secret validated by the Worker before proxying requests.
-- Optional overrides (see `lib/env.ts`): `CLAUDE_MODEL`, `AGENT_PERMISSION_MODE`, `AGENT_ENABLE_PARTIALS`.
-- Chat payload options: `toolMode` (`safe` / `full`) and `useProjectInstructions` (loads CLAUDE.md context when true).
+## Project Layout
 
-## Project structure highlights
+```
+app/
+├── api/
+│   ├── generate/route.ts     ← POST /api/generate — starts the agent, streams events
+│   └── workspace/route.ts    ← GET/DELETE /api/workspace — list & clear XML files
+├── components/
+│   ├── AttoChat.tsx          ← Main UI component (sidebar + chat + file panel)
+│   └── Chat.tsx              ← Original generic chat (kept for reference)
+└── page.tsx                  ← Entry point — renders AttoChat
 
-- `app/api/chat/route.ts` — streaming route that drives the Claude Agent SDK.
-- `app/components/Chat.tsx` — client UI with streaming parser & controls.
-- `lib/agent` — SDK option builder, message mappers, and transcript hooks.
-- `lib/policy` — filesystem jail + tool safety enforcement.
-- `lib/store/transcripts.ts` — JSONL transcript writer (`.data/sessions`).
-- `lib/mcp/servers.ts` — registry for in-process MCP servers (sample echo tool).
-- `tests/` — Vitest suites with environment bootstrapping (`tests/setup.ts`).
+lib/
+├── agent/
+│   ├── atto-session.ts       ← Builds agent session: system prompt, allowed tools, model routing
+│   ├── atto-config.ts        ← Model list and app-type options (no Node.js imports — safe for browser)
+│   ├── events.ts             ← Maps Claude Agent SDK messages → UI events
+│   └── session.ts            ← Generic session builder (used by original chat)
+├── castariProxy.ts           ← queryCastari() — wraps SDK query(), injects routing headers
+├── policy/
+│   ├── permission.ts         ← Tool allow-list + path jail for Write tool
+│   └── paths.ts              ← ensureInside() — prevents path traversal attacks
+└── env.ts                    ← Validated environment config (zod)
+```
 
-## Local data directories
+## How a Request Flows
 
-- `.data/sessions` — transcript JSONL files (gitignored).
-- `.data/out` — write sandbox for `Write`/`Edit` tools.
+```
+User types prompt → clicks Generate
+        │
+        ▼
+POST /api/generate
+  { query: "...", model: "or:google/gemini-2.5-flash", appType: "web" }
+        │
+        ▼
+startAttoQuery()
+  Builds Options:
+    - systemPrompt: Atto instructions (XML format, workspace path, tool usage rules)
+    - allowedTools: ['Read', 'Write', 'Glob', 'Grep']
+    - canUseTool:   path-jails Write to .data/workspace/
+    - model:        "or:google/gemini-2.5-flash"
+        │
+        ▼
+queryCastari()
+  - Reads model prefix → resolves provider (openrouter)
+  - Patches globalThis.fetch to intercept /v1/messages calls
+  - Adds headers: x-castari-provider, x-castari-model, x-castari-wire-model
+        │
+        ▼
+Claude Agent SDK — query()
+  Spawns agent subprocess, begins conversation
+        │
+        ▼
+[Every fetch to /v1/messages is intercepted]
+        │
+        ▼
+Your Cloudflare Worker (atto-proxy)
+  Reads headers → routes to OpenRouter
+  Translates Anthropic format → OpenRouter Chat Completions
+        │
+        ▼
+OpenRouter → Gemini 2.5 Flash
+        │
+        ▼ (response)
+Worker translates back → Anthropic format
+        │
+        ▼
+SDK receives response, executes tool calls (Read/Write/Glob)
+  Write tool: path rewritten to .data/workspace/test_name.xml
+        │
+        ▼
+Events streamed as JSONL to browser:
+  { type: "tool", data: { name: "Write", status: "call", input: { file_path, content } } }
+  { type: "partial", data: { textDelta: "..." } }
+  { type: "result", data: { usage, total_cost_usd } }
+        │
+        ▼
+AttoChat.tsx
+  - Tool events → displayed in chat, XML extracted → right panel
+  - Partial events → streamed into assistant message
+  - Result event → cost displayed in sidebar
+```
 
-## Note
+## Tool Policy (permission.ts)
 
-- The SDK reads project instructions only when `useProjectInstructions` is explicitly enabled per request.
-- Streaming responses include partial deltas when `AGENT_ENABLE_PARTIALS=true`.
-- All filesystem paths are normalized and compared against the repo root; writes are restricted to `.data/out`.
+The `atto` mode allows only these tools:
+
+| Tool | Purpose | Path restriction |
+|------|---------|-----------------|
+| `Read` | Read existing files | Must be inside project directory |
+| `Write` | Write new XML files | Forced into `.data/workspace/` — agent cannot escape |
+| `Glob` | List files by pattern | Must be inside project directory |
+| `Grep` | Search file contents | Must be inside project directory |
+| `Bash` | *(always blocked)* | — |
+
+Even if the model tries to write to `/etc/passwd` or `../../secrets`, the `canUseTool` hook rewrites the path to `.data/workspace/`.
+
+## The System Prompt (atto-session.ts)
+
+The system prompt tells the agent exactly:
+- It is "Atto", a test case generator for a specific app type
+- All files must be written to `.data/workspace/`
+- The exact XML format every file must follow
+- When to write files vs. answer questions vs. edit existing files
+- How to end its response (`<output>` block with workflow_type and summary)
+
+This is why the agent reliably produces structured output instead of freeform text.
+
+## Adding New Models
+
+Edit `lib/agent/atto-config.ts`:
+
+```typescript
+export const ATTO_MODEL_OPTIONS = [
+  // Anthropic models — use model name directly
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'Anthropic' },
+
+  // Any OpenRouter model — prefix with "or:"
+  { value: 'or:google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },
+  { value: 'or:cohere/command-r-plus', label: 'Command R+', provider: 'Cohere' },
+];
+```
+
+No other code changes needed. The routing is handled automatically by the model prefix.

@@ -1,236 +1,236 @@
-# POC-001 — Atto-like AI Test Case Generator
+# POC-001 — Atto AI Test Case Generator
 
-A standalone Python FastAPI application that replicates Testsigma's internal **Atto** system — an AI-powered test case generator — using **LiteLLM** as the model-agnostic backend instead of the Claude Code CLI.
+A proof-of-concept that replicates Testsigma's internal **Atto** system — an AI agent that turns a plain-English request into structured XML test case files.
 
-## Architecture
+The key idea demonstrated here: **use Claude's API format as the single interface, but route requests to any AI model** (Claude, Gemini, GPT-4o, Llama, Mistral) through a self-hosted proxy. The app never changes its code to switch models — just a model string in the UI.
+
+---
+
+## How It Works
 
 ```
-POST /generate
-     │
-     ▼
-Orchestrator (agentic loop, max 20 iterations)
-     │
-     ├── LiteLLM → OpenRouter (Gemini Flash / Claude Haiku fallback)
-     │
-     ├── Tools: ReadFile, WriteFile, DeleteFile, ListFiles, ValidateXML
-     │
-     ├── Hooks: post_write (XML validation), pre_delete (protect existing files)
-     │
-     └── Retry loop (max 3 retries on validation failure)
-          │
-          ▼
-     GenerateResponse { workflow_type, test_cases, summary, ... }
+Browser (Next.js UI)
+        │
+        │  POST /api/generate  { query, model, appType }
+        ▼
+Next.js API Route  ─── Claude Agent SDK ──► Your Cloudflare Worker (atto-proxy)
+                                                    │
+                                          reads "x-castari-provider" header
+                                                    │
+                              ┌─────────────────────┴──────────────────────┐
+                              │                                              │
+                    model starts with "claude-"               model starts with "or:"
+                              │                                              │
+                     Anthropic API                               OpenRouter API
+                  (Claude Sonnet, Haiku…)            (Gemini, GPT-4o, Llama, Mistral…)
 ```
+
+The proxy worker translates between Anthropic's message format and OpenRouter's format on the fly — your app always speaks one language.
+
+---
 
 ## Project Structure
 
 ```
-atto-poc/
-├── main.py                  # FastAPI entry point
-├── pyproject.toml           # uv dependencies
-├── .env.example             # Environment variable template
-├── app/
-│   ├── orchestrator.py      # Core agentic loop
-│   ├── tools.py             # ReadFile, WriteFile, DeleteFile, ValidateXML, ListFiles
-│   ├── hooks.py             # Pre/post tool hooks
-│   ├── prompts.py           # System & user prompt templates
-│   ├── tracer.py            # Portkey observability integration
-│   ├── models.py            # Pydantic request/response models
-│   └── config.py            # Settings loaded from .env
-└── workspace/               # Generated XML test case files land here
+POC-001/
+├── castari-proxy/
+│   ├── claude-agent-demo/      ← Main application (Next.js + TypeScript)
+│   │   ├── app/
+│   │   │   ├── api/
+│   │   │   │   ├── generate/   ← Streaming test-case generation endpoint
+│   │   │   │   └── workspace/  ← List & clear generated XML files
+│   │   │   ├── components/
+│   │   │   │   └── AttoChat.tsx  ← Main UI (3-panel layout)
+│   │   │   └── globals.css
+│   │   └── lib/
+│   │       ├── agent/
+│   │       │   ├── atto-session.ts   ← Session builder: system prompt + file tools
+│   │       │   └── atto-config.ts    ← Model list, app-type options
+│   │       ├── policy/
+│   │       │   └── permission.ts     ← Tool allow-list, path jail for Write tool
+│   │       └── castariProxy.ts       ← queryCastari() — wraps Claude Agent SDK
+│   │
+│   ├── src/                    ← queryCastari wrapper (npm package)
+│   └── worker/                 ← Cloudflare Worker (your self-hosted proxy)
+│       ├── src/
+│       │   ├── index.ts        ← Entry point: routes by provider header
+│       │   ├── translator.ts   ← Anthropic ↔ OpenRouter format conversion
+│       │   └── stream.ts       ← SSE streaming conversion
+│       └── wrangler.toml       ← Cloudflare deployment config
+│
+└── atto-poc/                   ← Original Python POC (kept for reference)
+    ├── main.py                 ← FastAPI server
+    ├── app/orchestrator.py     ← Agentic loop using LiteLLM
+    └── ui.py                   ← Streamlit demo UI
 ```
+
+---
 
 ## Prerequisites
 
-- **Python 3.12+**
-- **uv** package manager — install with:
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
-- An **OpenRouter API key** — sign up at [openrouter.ai](https://openrouter.ai) (free tier available)
-- *(Optional)* A **Portkey API key** for observability — [portkey.ai](https://portkey.ai)
+- **Node.js 18+**
+- An **Anthropic API key** — [console.anthropic.com](https://console.anthropic.com)
+- An **OpenRouter API key** — [openrouter.ai/keys](https://openrouter.ai/keys) *(needed for Gemini, GPT-4o, Llama etc.)*
+- A **Cloudflare account** — [cloudflare.com](https://cloudflare.com) *(free tier is enough)*
 
-## Setup & Run
+---
+
+## Setup
+
+### 1. Clone the repo
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/Bharath-Testsigma/POC-001.git
-cd POC-001/atto-poc
-
-# 2. Create your .env file
-cp .env.example .env
+cd POC-001/castari-proxy/claude-agent-demo
 ```
 
-Edit `.env` and fill in your keys:
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Deploy your own proxy worker
+
+The app routes all model calls through a Cloudflare Worker that you own and control. No third-party services.
+
+```bash
+cd ../worker
+npm install
+npx wrangler login       # opens browser — sign in to Cloudflare
+```
+
+Open `wrangler.toml` and replace the `account_id` with yours (found in Cloudflare dashboard → Workers & Pages, right sidebar):
+
+```toml
+name = "atto-proxy"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+```
+
+Deploy:
+
+```bash
+npx wrangler deploy
+# Output: https://atto-proxy.YOUR-SUBDOMAIN.workers.dev  ← copy this URL
+```
+
+### 4. Configure environment
+
+```bash
+cd ../claude-agent-demo
+cp .env.example .env.local
+```
+
+Edit `.env.local`:
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-...   # Required
-PORTKEY_API_KEY=...                # Optional — leave as-is to disable
-DEFAULT_MODEL=openrouter/google/gemini-flash-1.5
-FALLBACK_MODEL=openrouter/anthropic/claude-3-haiku
-OPENROUTER_API_BASE=https://openrouter.ai/api/v1
-WORKSPACE_DIR=workspace
-MAX_ITERATIONS=20
-MAX_RETRIES=3
+ANTHROPIC_API_KEY=sk-ant-...          # from console.anthropic.com
+OPENROUTER_API_KEY=sk-or-v1-...       # from openrouter.ai/keys
+CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
 ```
+
+### 5. Start the app
 
 ```bash
-# 3. Start the API server (Terminal 1)
-uv run main.py
+npm run dev
 ```
 
-Server starts at `http://localhost:8000`.  
-Interactive API docs: `http://localhost:8000/docs`
+Open **http://localhost:3000**
 
-```bash
-# 4. Launch the demo UI (Terminal 2)
-uv run streamlit run ui.py
+---
+
+## Using the App
+
+The UI has three panels:
+
+**Left — Controls**
+- Pick the AI model (Claude, Gemini, GPT-4o, Llama, Mistral, etc.)
+- Pick the application type (Web, Mobile, API, Desktop)
+- Toggle extended thinking (for Claude models only)
+- Cost display after each run
+
+**Centre — Conversation**
+- Type your test case request in the input box
+- Watch the agent work in real time — you see every file read/write as it happens
+- Thinking blocks (when enabled) show the model's reasoning before it acts
+
+**Right — Generated Test Cases**
+- Every XML file the agent writes appears here live
+- Click a file to view the XML
+- Copy button for each file
+
+**Example prompts to try:**
+```
+Generate login test cases for a web app — happy path and invalid credentials
+Generate an e-commerce checkout flow with 3 steps
+Edit the login test to add a "remember me" step
 ```
 
-Demo UI opens at `http://localhost:8501`.
+---
 
-## Demo UI
+## Available Models
 
-The Streamlit UI (`ui.py`) gives you a full interactive demo:
+| Model | Provider | Notes |
+|-------|----------|-------|
+| `claude-sonnet-4-6` | Anthropic | Best quality, direct |
+| `claude-haiku-4-5` | Anthropic | Fastest Claude |
+| `or:google/gemini-flash-1.5` | Google via OpenRouter | Very fast, cheap |
+| `or:google/gemini-2.5-flash` | Google via OpenRouter | Best Gemini |
+| `or:openai/gpt-4o-mini` | OpenAI via OpenRouter | Fast GPT-4 |
+| `or:openai/gpt-4o` | OpenAI via OpenRouter | Full GPT-4 |
+| `or:meta-llama/llama-3.1-8b-instruct` | Meta via OpenRouter | Open-source, free |
+| `or:mistralai/mistral-7b-instruct` | Mistral via OpenRouter | Open-source, free |
 
-- **Model selector** — switch between Gemini Flash, GPT-4o, Claude Sonnet, Mistral, Llama (free) per request without restarting
-- **One-click prompts** — pre-filled example queries to start demoing immediately
-- **Live cost comparison** — shows estimated cost for the exact call across all 8 models side-by-side after every generation
-- **XML viewer** — generated test case files with syntax highlighting
-- **Metrics bar** — workflow type, model used, tool calls made, retries, elapsed time
-- **Raw JSON panel** — full API response for debugging
+Models prefixed with `or:` are routed to OpenRouter. Everything else goes to Anthropic directly.
 
-## API Endpoints
+---
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/generate` | Generate test cases from a natural language query |
-| `GET`  | `/workspace` | List all generated XML files |
-| `GET`  | `/workspace/{filename}` | Get content of a specific test case file |
-| `DELETE` | `/workspace` | Clear all files (reset for a new session) |
+## How the Multi-Model Routing Works
 
-## Example Usage
+This is the core technique being demonstrated.
 
-### Generate test cases
+The **Claude Agent SDK** is built to talk exclusively to Anthropic's API. To use other models, we intercept outgoing HTTP requests using `queryCastari()` — a thin wrapper that:
 
-```bash
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Generate a login test case for Gmail",
-    "app_type": "web",
-    "existing_files": []
-  }'
-```
+1. Reads the `model` string you pass
+2. Sets routing headers (`x-castari-provider`, `x-castari-model`) on every fetch request
+3. Redirects all `/v1/messages` calls to your Cloudflare Worker instead of `api.anthropic.com`
 
-**Response:**
+The **Cloudflare Worker** (`worker/src/`) then:
+- Reads the provider header
+- If `anthropic` → forwards to `api.anthropic.com` unchanged
+- If `openrouter` → translates the Anthropic message format to OpenRouter's Chat Completions format, including tool calls, streaming, and stop reasons
 
-```json
-{
-  "conversation_id": "abc-123",
-  "workflow_type": "GENERATION",
-  "answer": null,
-  "test_cases": [
-    {
-      "file_name": "gmail_login_success.xml",
-      "title": "Gmail Login - Happy Path",
-      "content": "<?xml version=\"1.0\"?>..."
-    }
-  ],
-  "summary": "Generated 1 test case for Gmail login.",
-  "tool_calls_made": 2,
-  "retries": 0
-}
-```
+The app code never knows which provider it's using. You swap models by changing one string.
 
-### Ask a question (no files written)
+---
 
-```bash
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What XML format do test cases use?",
-    "app_type": "web"
-  }'
-```
+## Architecture Decisions
 
-### Edit an existing test case
+**Why a proxy worker instead of calling OpenRouter directly?**
 
-```bash
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Add a logout step to gmail_login_success.xml",
-    "app_type": "web",
-    "existing_files": ["gmail_login_success.xml"]
-  }'
-```
+The Claude Agent SDK patches `globalThis.fetch` and intercepts all calls to `/v1/messages`. It cannot be easily redirected per-call. The proxy is the cleanest way to translate formats without forking the SDK.
 
-### List workspace files
+**Why Cloudflare Workers?**
 
-```bash
-curl http://localhost:8000/workspace
-```
+- Runs at the edge (low latency)
+- No server to manage — it scales automatically
+- Free tier handles 100k requests/day
+- The translation logic is stateless — perfect for Workers
 
-### Read a specific file
+**Why not just use LiteLLM?**
 
-```bash
-curl http://localhost:8000/workspace/gmail_login_success.xml
-```
+The original Python POC (`atto-poc/`) used LiteLLM for model switching. This version uses the Claude Agent SDK because it provides native tool streaming, extended thinking support, session resumption, and MCP integration — features LiteLLM doesn't expose. The trade-off is that we need the proxy layer to support non-Anthropic models.
 
-### Clear the workspace
+---
 
-```bash
-curl -X DELETE http://localhost:8000/workspace
-```
+## Security Notes
 
-## Switching Models
+- API keys are passed request-by-request from the Next.js server to the worker. They are never stored in the worker or Cloudflare.
+- The Write tool is path-jailed to `.data/workspace/` — the agent cannot write outside this directory regardless of what the model requests.
+- `Bash` and `KillBash` tools are always blocked, preventing arbitrary command execution.
 
-Change `DEFAULT_MODEL` in `.env` to any OpenRouter-supported model:
+---
 
-```env
-# Gemini Flash (default — fast & cheap)
-DEFAULT_MODEL=openrouter/google/gemini-flash-1.5
+## Legacy Python POC
 
-# GPT-4o
-DEFAULT_MODEL=openrouter/openai/gpt-4o
-
-# Claude 3.5 Sonnet
-DEFAULT_MODEL=openrouter/anthropic/claude-3.5-sonnet
-
-# Mistral Large
-DEFAULT_MODEL=openrouter/mistralai/mistral-large
-```
-
-Full model list: [openrouter.ai/models](https://openrouter.ai/models)
-
-## Configuration Reference
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | — | **Required.** Your OpenRouter API key |
-| `PORTKEY_API_KEY` | — | Optional. Enables Portkey observability tracing |
-| `DEFAULT_MODEL` | `openrouter/google/gemini-flash-1.5` | Primary LLM model |
-| `FALLBACK_MODEL` | `openrouter/anthropic/claude-3-haiku` | Fallback if primary model fails |
-| `OPENROUTER_API_BASE` | `https://openrouter.ai/api/v1` | OpenRouter endpoint |
-| `WORKSPACE_DIR` | `workspace` | Directory where XML files are written |
-| `MAX_ITERATIONS` | `20` | Hard cap on agentic loop iterations |
-| `MAX_RETRIES` | `3` | Max retries after XML validation failure |
-
-## How It Works
-
-1. Your query hits `POST /generate`.
-2. The orchestrator builds a system prompt (XML format rules, available tools, existing files list) and sends it to the LLM via LiteLLM.
-3. The LLM enters an agentic loop — it calls tools (`WriteFile`, `ReadFile`, etc.) until it's done.
-4. After every `WriteFile`, a **post-write hook** automatically validates the XML. If invalid, the error is fed back to the LLM for self-correction (up to 3 retries).
-5. A **pre-delete hook** prevents the LLM from deleting files passed in `existing_files`.
-6. Once the LLM emits a plain text response with an `<output>` block, the loop exits and a structured `GenerateResponse` is returned.
-
-## Tech Stack
-
-- **Python 3.12** + **FastAPI** — API layer
-- **LiteLLM** — Model-agnostic LLM interface (one API for all providers)
-- **OpenRouter** — Multi-model provider (Gemini, Claude, GPT-4o, Mistral, …)
-- **Portkey** — LLM observability & tracing (optional)
-- **Pydantic v2** — Request/response validation
-- **uv** — Fast Python dependency management
+The `atto-poc/` directory contains the original Python implementation using FastAPI + LiteLLM + Streamlit. It still works and is kept for reference. See `atto-poc/README.md` (if present) or the root README history for setup instructions.
