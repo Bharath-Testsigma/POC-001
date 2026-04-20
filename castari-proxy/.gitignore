@@ -1,0 +1,19 @@
+# Claude Proxy gitignore
+
+# Node / package manager artifacts
+node_modules/
+*.log
+*.tsbuildinfo
+
+# Claude Code / agent docs (local only)
+AGENTS.md
+CLAUDE.md
+build_docs/
+reference_docs/
+.claude/
+
+# Environment files
+.env*
+
+# Misc
+.DS_Store

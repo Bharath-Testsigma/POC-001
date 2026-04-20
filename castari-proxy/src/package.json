@@ -1,0 +1,27 @@
+{
+  "name": "@castari/castari-proxy",
+  "version": "0.1.0",
+  "description": "Drop-in wrapper for @anthropic-ai/claude-agent-sdk that routes via the Castari Worker to Anthropic or OpenRouter models.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": {
+      "import": "./index.ts",
+      "types": "./index.ts"
+    }
+  },
+  "files": [
+    "index.ts",
+    "queryCastari.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "anthropic",
+    "claude",
+    "agent-sdk",
+    "openrouter",
+    "castari"
+  ]
+}

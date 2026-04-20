@@ -1,0 +1,13 @@
+name = "castari-worker"
+main = "src/index.ts"
+account_id = "6444e0f9662766ec34cfeef001af3549"
+workers_dev = true
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+SERVER_TOOLS_MODE = "emulate"
+MCP_BRIDGE_MODE = "off"
+OPENROUTER_DEFAULT_VENDOR = "openai"
+UPSTREAM_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+UPSTREAM_OPENROUTER_BASE_URL = "https://openrouter.ai/api"
