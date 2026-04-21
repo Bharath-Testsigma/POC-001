@@ -43,6 +43,21 @@ const THINKING_MAX = 64000;
 const THINKING_STEP = 1024;
 const DEFAULT_THINKING_BUDGET = 8000;
 
+const PROVIDER_COLORS: Record<string, string> = {
+  Anthropic: '#c96442',
+  Google: '#4285f4',
+  OpenAI: '#10a37f',
+  Meta: '#0866ff',
+  Mistral: '#f54e42',
+};
+
+const EXAMPLE_PROMPTS = [
+  'Generate login test cases — happy path and invalid credentials',
+  'Generate an e-commerce checkout flow with 3 steps',
+  'Generate password reset flow test cases',
+  'Generate search functionality test cases',
+];
+
 /* ================================================================== component */
 
 export function AttoChat() {
@@ -60,6 +75,8 @@ export function AttoChat() {
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const assistantIndexRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -95,11 +112,7 @@ export function AttoChat() {
       switch (event.type) {
         case 'system':
           setSessionId(event.data.session_id);
-          appendMessage({
-            id: crypto.randomUUID(),
-            role: 'system',
-            content: `Session started — model: ${event.data.model}`,
-          });
+          setActiveModel(event.data.model);
           break;
 
         case 'partial':
@@ -165,7 +178,6 @@ export function AttoChat() {
               isError: event.data.isError ?? prev_tc?.isError,
             };
 
-            // Extract generated XML files from Write tool calls
             if (
               event.data.name === 'Write' &&
               event.data.status === 'call' &&
@@ -231,8 +243,9 @@ export function AttoChat() {
     [handleEvent]
   );
 
-  const handleSend = useCallback(async () => {
-    if (pending || !input.trim()) return;
+  const handleSend = useCallback(async (overrideInput?: string) => {
+    const text = overrideInput ?? input;
+    if (pending || !text.trim()) return;
     setPending(true);
     setError(null);
     setUsage(null);
@@ -242,12 +255,12 @@ export function AttoChat() {
     abortRef.current?.abort();
     abortRef.current = controller;
 
-    appendMessage({ id: crypto.randomUUID(), role: 'user', content: input.trim() });
+    appendMessage({ id: crypto.randomUUID(), role: 'user', content: text.trim() });
     setInput('');
 
     try {
       const payload: Record<string, unknown> = {
-        query: input.trim(),
+        query: text.trim(),
         appType,
         model,
         ...(sessionId ? { sessionId } : {}),
@@ -294,163 +307,232 @@ export function AttoChat() {
     setUsage(null);
     setError(null);
     setSessionId(null);
+    setActiveModel(null);
+  }, []);
+
+  const handleCopy = useCallback(async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }, []);
 
   const selectedModelInfo = ATTO_MODEL_OPTIONS.find((m) => m.value === model);
   const selectedFileContent = generatedFiles.find((f) => f.name === selectedFile)?.content;
+  const providerColor = selectedModelInfo ? PROVIDER_COLORS[selectedModelInfo.provider] ?? '#7c8fb3' : '#7c8fb3';
 
   return (
-    <div className="atto-shell">
-      {/* ── Sidebar ─────────────────────────────────── */}
-      <aside className="atto-sidebar">
-        <div className="atto-sidebar-brand">
-          <h1>Atto</h1>
-          <p>AI Test Case Generator</p>
-          <p className="atto-powered">Powered by castari-proxy</p>
+    <div className="ac-shell">
+      {/* ── Left sidebar ─────────────────────────────── */}
+      <aside className="ac-sidebar">
+        <div className="ac-brand">
+          <span className="ac-brand-logo">Atto</span>
+          <span className="ac-brand-sub">Test Case Generator</span>
         </div>
 
-        <div className="atto-sidebar-section">
-          <label className="atto-label">
-            <span>Model</span>
-            <select value={model} onChange={(e) => setModel(e.target.value)} disabled={pending}>
+        {/* Model selector */}
+        <div className="ac-section">
+          <span className="ac-section-label">AI Model</span>
+          <div className="ac-model-selector">
+            <select
+              value={model}
+              onChange={(e) => { setModel(e.target.value); }}
+              disabled={pending}
+              className="ac-select"
+            >
               {ATTO_MODEL_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.label} ({opt.provider})
+                  {opt.label}
                 </option>
               ))}
             </select>
-          </label>
-          {selectedModelInfo && (
-            <div className="atto-model-badge">{selectedModelInfo.provider}</div>
-          )}
+            {selectedModelInfo && (
+              <span
+                className="ac-provider-pill"
+                style={{ background: `${providerColor}22`, color: providerColor, borderColor: `${providerColor}44` }}
+              >
+                {selectedModelInfo.provider}
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="atto-sidebar-section">
-          <label className="atto-label">
-            <span>Application Type</span>
-            <select value={appType} onChange={(e) => setAppType(e.target.value)} disabled={pending}>
-              {APP_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </label>
+        {/* App type */}
+        <div className="ac-section">
+          <span className="ac-section-label">App Type</span>
+          <select value={appType} onChange={(e) => setAppType(e.target.value)} disabled={pending} className="ac-select">
+            {APP_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
 
-        <div className="atto-sidebar-section">
-          <label className="atto-inline">
+        {/* Thinking (Claude only) */}
+        <div className="ac-section">
+          <label className="ac-toggle">
             <input
               type="checkbox"
               checked={thinkingEnabled}
               onChange={(e) => setThinkingEnabled(e.target.checked)}
               disabled={pending}
             />
-            <span>Extended thinking</span>
+            <span className="ac-toggle-track" />
+            <span className="ac-toggle-label">Extended thinking</span>
           </label>
 
           {thinkingEnabled && (
-            <label className="atto-label">
-              <span>Thinking budget (tokens)</span>
+            <>
+              <label className="ac-section-label" style={{ marginTop: '0.5rem' }}>
+                Budget: {thinkingBudget.toLocaleString()} tokens
+              </label>
               <input
-                type="number"
+                type="range"
                 min={THINKING_MIN}
                 max={THINKING_MAX}
                 step={THINKING_STEP}
                 value={thinkingBudget}
                 disabled={pending}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (!Number.isNaN(v)) setThinkingBudget(Math.max(THINKING_MIN, Math.min(THINKING_MAX, v)));
-                }}
+                onChange={(e) => setThinkingBudget(Number(e.target.value))}
+                className="ac-range"
               />
-            </label>
+            </>
           )}
 
-          <label className="atto-inline">
+          <label className="ac-toggle" style={{ marginTop: '0.25rem' }}>
             <input
               type="checkbox"
               checked={showThinking}
               onChange={(e) => setShowThinking(e.target.checked)}
             />
-            <span>Show thinking blocks</span>
+            <span className="ac-toggle-track" />
+            <span className="ac-toggle-label">Show thinking</span>
           </label>
         </div>
 
+        {/* Usage stats */}
         {usage && (
-          <div className="atto-usage">
-            <div className="atto-usage-title">Last run</div>
-            <div className="atto-usage-row">
-              <span>Input tokens</span>
-              <span>{usage.usage.input_tokens.toLocaleString()}</span>
+          <div className="ac-usage">
+            <span className="ac-usage-title">Last run</span>
+            <div className="ac-usage-grid">
+              <span>Input</span><span>{usage.usage.input_tokens.toLocaleString()}</span>
+              <span>Output</span><span>{usage.usage.output_tokens.toLocaleString()}</span>
+              {usage.duration_ms != null && (
+                <><span>Time</span><span>{(usage.duration_ms / 1000).toFixed(1)}s</span></>
+              )}
+              {usage.total_cost_usd != null && (
+                <><span className="ac-cost-label">Cost</span><span className="ac-cost-value">${usage.total_cost_usd.toFixed(4)}</span></>
+              )}
             </div>
-            <div className="atto-usage-row">
-              <span>Output tokens</span>
-              <span>{usage.usage.output_tokens.toLocaleString()}</span>
-            </div>
-            {usage.total_cost_usd != null && (
-              <div className="atto-usage-row atto-usage-cost">
-                <span>Cost</span>
-                <span>${usage.total_cost_usd.toFixed(4)}</span>
-              </div>
-            )}
-            {usage.duration_ms != null && (
-              <div className="atto-usage-row">
-                <span>Duration</span>
-                <span>{(usage.duration_ms / 1000).toFixed(1)}s</span>
-              </div>
-            )}
           </div>
         )}
 
-        <div className="atto-sidebar-actions">
-          <button type="button" onClick={handleReset} disabled={pending} className="atto-btn-secondary">
-            New session
+        {/* Actions */}
+        <div className="ac-actions">
+          <button type="button" onClick={handleReset} disabled={pending} className="ac-btn-ghost">
+            New chat
           </button>
-          <button
-            type="button"
-            onClick={handleClearWorkspace}
-            disabled={pending || clearing}
-            className="atto-btn-danger"
-          >
-            Clear workspace
+          <button type="button" onClick={handleClearWorkspace} disabled={pending || clearing} className="ac-btn-danger">
+            Clear files
           </button>
         </div>
       </aside>
 
-      {/* ── Main: conversation ──────────────────────── */}
-      <main className="atto-main">
-        <div className="atto-messages">
-          {messages.length === 0 && (
-            <div className="atto-empty">
-              <p>Describe the test cases you need.</p>
-              <p className="atto-empty-hint">
-                e.g. &quot;Generate login test cases for happy path and invalid credentials&quot;
-              </p>
+      {/* ── Centre: conversation ──────────────────────── */}
+      <main className="ac-main">
+        {/* Top bar showing active model */}
+        <div className="ac-topbar">
+          <div className="ac-topbar-model">
+            <span className="ac-topbar-dot" style={{ background: providerColor }} />
+            <span>{selectedModelInfo?.label ?? model}</span>
+            {sessionId && <span className="ac-topbar-session">session active</span>}
+          </div>
+          {pending && (
+            <div className="ac-topbar-status">
+              <span className="ac-spinner" />
+              Generating…
+            </div>
+          )}
+        </div>
+
+        {/* Messages */}
+        <div className="ac-messages">
+          {messages.length === 0 && !pending && (
+            <div className="ac-empty">
+              <div className="ac-empty-icon">✦</div>
+              <p className="ac-empty-title">What test cases do you need?</p>
+              <p className="ac-empty-sub">Describe a feature or flow and Atto will write structured XML test cases.</p>
+              <div className="ac-prompts">
+                {EXAMPLE_PROMPTS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className="ac-prompt-chip"
+                    onClick={() => handleSend(p)}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
           {messages.map((msg, i) => {
             if (!showThinking && msg.role === 'thinking') return null;
-            return (
-              <div key={`${msg.id}-${i}`} className={`atto-msg atto-msg-${msg.role}`}>
-                <div className="atto-msg-role">{msg.role}</div>
-                <div className="atto-msg-body">
-                  {msg.role === 'tool' && msg.toolCall ? (
-                    <AttoToolCard tool={msg.toolCall} />
-                  ) : msg.role === 'thinking' && msg.thinking ? (
-                    <AttoThinkingCard thinking={msg.thinking} />
-                  ) : (
-                    <p>{msg.content}</p>
-                  )}
+
+            if (msg.role === 'user') {
+              return (
+                <div key={`${msg.id}-${i}`} className="ac-row ac-row-user">
+                  <div className="ac-bubble ac-bubble-user">{msg.content}</div>
                 </div>
-              </div>
-            );
+              );
+            }
+
+            if (msg.role === 'assistant') {
+              return (
+                <div key={`${msg.id}-${i}`} className="ac-row ac-row-assistant">
+                  <div className="ac-avatar" style={{ background: providerColor }}>
+                    {selectedModelInfo?.provider?.charAt(0) ?? 'A'}
+                  </div>
+                  <div className="ac-bubble ac-bubble-assistant">
+                    {msg.content || <span className="ac-placeholder">…</span>}
+                  </div>
+                </div>
+              );
+            }
+
+            if (msg.role === 'tool' && msg.toolCall) {
+              return (
+                <div key={`${msg.id}-${i}`} className="ac-row ac-row-tool">
+                  <AttoToolCard tool={msg.toolCall} />
+                </div>
+              );
+            }
+
+            if (msg.role === 'thinking' && msg.thinking) {
+              return (
+                <div key={`${msg.id}-${i}`} className="ac-row ac-row-thinking">
+                  <AttoThinkingCard thinking={msg.thinking} />
+                </div>
+              );
+            }
+
+            if (msg.role === 'error') {
+              return (
+                <div key={`${msg.id}-${i}`} className="ac-row">
+                  <div className="ac-bubble ac-bubble-error">{msg.content}</div>
+                </div>
+              );
+            }
+
+            return null;
           })}
 
-          {pending && (
-            <div className="atto-msg atto-msg-system">
-              <div className="atto-msg-role">agent</div>
-              <div className="atto-msg-body atto-typing">
-                <span /><span /><span />
+          {pending && messages.filter(m => m.role !== 'user').length === 0 && (
+            <div className="ac-row ac-row-assistant">
+              <div className="ac-avatar" style={{ background: providerColor }}>
+                {selectedModelInfo?.provider?.charAt(0) ?? 'A'}
+              </div>
+              <div className="ac-bubble ac-bubble-assistant">
+                <div className="ac-typing"><span /><span /><span /></div>
               </div>
             </div>
           )}
@@ -458,14 +540,16 @@ export function AttoChat() {
           <div ref={bottomRef} />
         </div>
 
-        {error && <div className="atto-error">{error}</div>}
+        {error && <div className="ac-error-bar">{error}</div>}
 
-        <div className="atto-input-area">
+        {/* Input */}
+        <div className="ac-input-row">
           <textarea
             rows={3}
             value={input}
-            placeholder="Describe the test case(s) you want to generate…"
+            placeholder="Describe the test cases you want to generate…"
             disabled={pending}
+            className="ac-textarea"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -474,62 +558,74 @@ export function AttoChat() {
               }
             }}
           />
-          <div className="atto-input-actions">
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={pending || !input.trim()}
-              className="atto-btn-primary"
-            >
-              {pending ? 'Generating…' : 'Generate'}
-            </button>
-            {pending && (
-              <button type="button" onClick={() => abortRef.current?.abort()} className="atto-btn-secondary">
-                Stop
+          <div className="ac-send-row">
+            <span className="ac-hint">Enter to send · Shift+Enter for newline</span>
+            <div className="ac-send-btns">
+              {pending && (
+                <button type="button" onClick={() => abortRef.current?.abort()} className="ac-btn-ghost">
+                  Stop
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleSend()}
+                disabled={pending || !input.trim()}
+                className="ac-btn-primary"
+              >
+                {pending ? 'Generating…' : 'Generate'}
               </button>
-            )}
+            </div>
           </div>
         </div>
       </main>
 
-      {/* ── Right panel: generated test cases ───────── */}
-      <aside className="atto-panel">
-        <div className="atto-panel-header">
-          <h2>Generated Test Cases</h2>
-          <span className="atto-panel-count">{generatedFiles.length}</span>
+      {/* ── Right panel: generated files ─────────────── */}
+      <aside className="ac-panel">
+        <div className="ac-panel-head">
+          <span className="ac-panel-title">Generated Files</span>
+          <span className="ac-panel-badge">{generatedFiles.length}</span>
         </div>
 
         {generatedFiles.length === 0 ? (
-          <div className="atto-panel-empty">No test cases yet. Run a generation to see results here.</div>
+          <div className="ac-panel-empty">
+            <div className="ac-panel-empty-icon">📂</div>
+            <p>No files yet.</p>
+            <p>Run a generation and XML test cases will appear here.</p>
+          </div>
         ) : (
           <>
-            <div className="atto-file-list">
+            <div className="ac-file-list">
               {generatedFiles.map((f) => (
                 <button
                   key={f.name}
                   type="button"
-                  className={`atto-file-item ${selectedFile === f.name ? 'active' : ''}`}
+                  className={`ac-file-btn ${selectedFile === f.name ? 'active' : ''}`}
                   onClick={() => setSelectedFile(f.name)}
                 >
-                  <span className="atto-file-icon">📄</span>
-                  <span className="atto-file-name">{f.name}</span>
+                  <svg className="ac-file-icon" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 2h7l3 3v9H3V2z" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+                    <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.2"/>
+                    <path d="M5 7h6M5 9.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  </svg>
+                  <span className="ac-file-name">{f.name.replace('.xml', '')}</span>
+                  <span className="ac-file-ext">.xml</span>
                 </button>
               ))}
             </div>
 
             {selectedFileContent && (
-              <div className="atto-file-viewer">
-                <div className="atto-file-viewer-header">
-                  <span>{selectedFile}</span>
+              <div className="ac-viewer">
+                <div className="ac-viewer-head">
+                  <span className="ac-viewer-name">{selectedFile}</span>
                   <button
                     type="button"
-                    className="atto-copy-btn"
-                    onClick={() => navigator.clipboard.writeText(selectedFileContent)}
+                    className="ac-copy-btn"
+                    onClick={() => handleCopy(selectedFileContent)}
                   >
-                    Copy
+                    {copied ? 'Copied!' : 'Copy'}
                   </button>
                 </div>
-                <pre className="atto-xml">{selectedFileContent}</pre>
+                <pre className="ac-viewer-code">{selectedFileContent}</pre>
               </div>
             )}
           </>
@@ -542,20 +638,39 @@ export function AttoChat() {
 /* ------------------------------------------------------------------ sub-components */
 
 function AttoToolCard({ tool }: { tool: ToolCallState }) {
-  const statusLabel =
-    tool.status === 'call' ? 'Calling' : tool.status === 'progress' ? 'Running' : tool.isError ? 'Failed' : 'Done';
+  const [expanded, setExpanded] = useState(false);
+
+  const icon = tool.name === 'Write' ? '✎' : tool.name === 'Read' ? '◎' : tool.name === 'Glob' ? '⊞' : '⊡';
+  const isWrite = tool.name === 'Write';
+  const filePath = (tool.input as { file_path?: string })?.file_path?.split('/').pop() ?? '';
+
+  const statusColor = tool.isError ? '#d66d6d' : tool.status === 'result' ? '#6dbf7e' : '#d4a830';
+  const statusLabel = tool.isError ? 'failed' : tool.status === 'call' ? 'calling' : tool.status === 'progress' ? 'running' : 'done';
 
   return (
-    <div className={`atto-tool status-${tool.status} ${tool.isError ? 'is-error' : ''}`}>
-      <div className="atto-tool-header">
-        <span className="atto-tool-name">{tool.name}</span>
-        <span className={`atto-tool-badge status-${tool.status}`}>{statusLabel}</span>
+    <div className={`ac-tool ${tool.status} ${tool.isError ? 'error' : ''}`}>
+      <button type="button" className="ac-tool-header" onClick={() => setExpanded((x) => !x)}>
+        <span className="ac-tool-icon">{icon}</span>
+        <span className="ac-tool-name">{tool.name}</span>
+        {filePath && <span className="ac-tool-path">{filePath}</span>}
+        <span className="ac-tool-status" style={{ color: statusColor }}>{statusLabel}</span>
         {tool.elapsedTimeSeconds != null && (
-          <span className="atto-tool-time">{tool.elapsedTimeSeconds.toFixed(1)}s</span>
+          <span className="ac-tool-time">{tool.elapsedTimeSeconds.toFixed(1)}s</span>
         )}
-      </div>
-      {tool.input != null && (
-        <pre className="atto-tool-pre">{formatData(tool.input)}</pre>
+        <span className="ac-tool-chevron">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && tool.input != null && (
+        <pre className="ac-tool-body">{formatData(tool.input)}</pre>
+      )}
+
+      {isWrite && tool.status === 'result' && (
+        <div className="ac-tool-written">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none">
+            <path d="M2 8l4 4 8-8" stroke="#6dbf7e" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          Test case written
+        </div>
       )}
     </div>
   );
@@ -566,18 +681,19 @@ function AttoThinkingCard({ thinking }: { thinking: ThinkingState }) {
   const streaming = thinking.status !== 'complete';
 
   return (
-    <div className={`atto-thinking ${thinking.status}`}>
-      <div className="atto-thinking-header">
-        <span>{streaming ? 'Thinking…' : 'Thinking complete'}</span>
+    <div className={`ac-thinking ${thinking.status}`}>
+      <div className="ac-thinking-head">
+        <span className="ac-thinking-dot" />
+        <span>{streaming ? 'Thinking…' : 'Thought process'}</span>
         {!streaming && (
-          <button type="button" onClick={() => setCollapsed((c) => !c)}>
+          <button type="button" onClick={() => setCollapsed((c) => !c)} className="ac-thinking-toggle">
             {collapsed ? 'Show' : 'Hide'}
           </button>
         )}
       </div>
       {!collapsed && (
-        <pre className="atto-thinking-body">
-          {thinking.redacted ? '[Redacted]' : thinking.text || '…'}
+        <pre className="ac-thinking-body">
+          {thinking.redacted ? '[Redacted by provider]' : thinking.text || '…'}
         </pre>
       )}
     </div>
