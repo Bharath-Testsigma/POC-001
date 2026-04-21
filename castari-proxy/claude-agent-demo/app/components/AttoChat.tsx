@@ -340,10 +340,12 @@ export function AttoChat() {
               disabled={pending}
               className="ac-select"
             >
-              {ATTO_MODEL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+              {Array.from(new Set(ATTO_MODEL_OPTIONS.map((o) => o.provider))).map((provider) => (
+                <optgroup key={provider} label={provider === 'Ollama' ? '⚡ Local (Ollama)' : provider}>
+                  {ATTO_MODEL_OPTIONS.filter((o) => o.provider === provider).map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
             {selectedModelInfo && (
