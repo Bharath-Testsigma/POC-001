@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { query, type Options, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
-export type Provider = 'anthropic' | 'openrouter';
+export type Provider = 'anthropic' | 'openrouter' | 'gemini' | 'openai';
 
 export interface ProviderCredentials {
   apiKey?: string;
@@ -65,13 +65,20 @@ export function resolveProvider(model: string): Provider {
   const normalized = model.trim();
   if (!normalized) throw new Error('model must be a non-empty string');
   if (normalized.startsWith('or:') || normalized.startsWith('openrouter/')) return 'openrouter';
-  if (normalized.startsWith('openai/')) return 'openrouter';
   if (normalized.startsWith('anthropic/')) return 'anthropic';
   if (normalized.startsWith('claude')) return 'anthropic';
+  if (normalized.startsWith('g:') || normalized.startsWith('gemini-') || normalized.startsWith('gemini/')) return 'gemini';
+  if (normalized.startsWith('o:')) return 'openai';
   return 'anthropic';
 }
 
 export function resolveWireModel(model: string, provider: Provider, defaultVendor = 'openai'): string {
+  if (provider === 'gemini') {
+    return model.startsWith('g:') ? model.slice(2) : model;
+  }
+  if (provider === 'openai') {
+    return model.startsWith('o:') ? model.slice(2) : model;
+  }
   if (provider === 'openrouter') {
     if (model.startsWith('or:')) {
       const slug = model.slice(3);
@@ -133,7 +140,11 @@ export function queryCastari({
 
   const credential = getCredentialsForProvider(provider, providers, effectiveEnv);
   if (!credential) {
-    const missing = provider === 'openrouter' ? 'OPENROUTER_API_KEY' : 'ANTHROPIC_API_KEY';
+    const missing =
+      provider === 'openrouter' ? 'OPENROUTER_API_KEY' :
+      provider === 'gemini' ? 'GEMINI_API_KEY' :
+      provider === 'openai' ? 'OPENAI_API_KEY' :
+      'ANTHROPIC_API_KEY';
     throw new Error(`${missing} is required for model ${model}`);
   }
   effectiveEnv.ANTHROPIC_API_KEY = credential;
@@ -285,6 +296,12 @@ function getCredentialsForProvider(
 ): string | undefined {
   if (provider === 'openrouter') {
     return providers?.openrouter?.apiKey ?? env.OPENROUTER_API_KEY;
+  }
+  if (provider === 'gemini') {
+    return env.GEMINI_API_KEY;
+  }
+  if (provider === 'openai') {
+    return env.OPENAI_API_KEY;
   }
   return providers?.anthropic?.apiKey ?? env.ANTHROPIC_API_KEY;
 }
