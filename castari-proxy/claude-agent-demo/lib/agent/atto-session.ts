@@ -85,7 +85,7 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
   const baseUrl = isOllama
     ? `${process.env.NEXT_SERVER_URL ?? 'http://localhost:3000'}/api/ollama`
     : isPortkey
-    ? 'https://api.portkey.ai/v1'
+    ? 'https://api.portkey.ai'
     : env.CASTARI_WORKER_URL;
 
   const envOverrides: Record<string, string> = {
