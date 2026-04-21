@@ -92,6 +92,12 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
   };
 
   if (env.OPENROUTER_API_KEY) envOverrides.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
+  if ((env as Record<string, string | undefined>).GEMINI_API_KEY) {
+    envOverrides.GEMINI_API_KEY = (env as Record<string, string | undefined>).GEMINI_API_KEY!;
+  }
+  if ((env as Record<string, string | undefined>).OPENAI_API_KEY) {
+    envOverrides.OPENAI_API_KEY = (env as Record<string, string | undefined>).OPENAI_API_KEY!;
+  }
   if (env.CASTARI_WORKER_TOKEN) envOverrides.X_WORKER_TOKEN = env.CASTARI_WORKER_TOKEN;
 
   const options: Options = {
@@ -112,7 +118,8 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
     resume: config.sessionId,
   };
 
-  if (!isOllama && config.thinkingBudget && config.thinkingBudget > 0) {
+  const supportsThinking = config.model.startsWith('claude');
+  if (supportsThinking && config.thinkingBudget && config.thinkingBudget > 0) {
     options.maxThinkingTokens = config.thinkingBudget;
   }
 
