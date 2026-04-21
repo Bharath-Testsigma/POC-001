@@ -286,8 +286,16 @@ function ensureInterceptorInstalled(): void {
       try {
         const raw = await request.clone().text();
         if (raw) {
-          const updated = injectReasoningIntoPayload(raw, ctx?.reasoning);
+          // For portkey, replace the pk:provider/model string with the bare wire model
+          // that the provider understands (e.g. "pk:anthropic/claude-haiku..." → "claude-haiku...")
+          let workingRaw = raw;
+          if (ctx?.provider === 'portkey' && ctx.wireModel) {
+            const overridden = overrideModelInBody(workingRaw, ctx.wireModel);
+            if (overridden !== null) workingRaw = overridden;
+          }
+          const updated = injectReasoningIntoPayload(workingRaw, ctx?.reasoning);
           if (updated !== null) nextBody = updated;
+          else if (workingRaw !== raw) nextBody = workingRaw;
         }
       } catch {
         // no-op
@@ -380,6 +388,17 @@ function normalizeReasoning(
   else if (sum && sum !== 'auto') result.summary = sum;
 
   return Object.keys(result).length ? result : undefined;
+}
+
+function overrideModelInBody(raw: string, model: string): string | null {
+  try {
+    const payload = JSON.parse(raw);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    payload.model = model;
+    return JSON.stringify(payload);
+  } catch {
+    return null;
+  }
 }
 
 function injectReasoningIntoPayload(raw: string, reasoning?: ReasoningConfig): string | null {
