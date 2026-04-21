@@ -9,6 +9,7 @@ export const ATTO_MODEL_OPTIONS = [
   { value: 'or:openai/gpt-oss-20b:free', label: 'GPT-OSS 20B (free)', provider: 'OpenAI' },
 
   // Ollama — local models (requires: ollama serve + ollama pull <model>)
+  { value: 'ollama:gemma4:e4b', label: 'Gemma 4 (4B)', provider: 'Ollama' },
   { value: 'ollama:llama3.2', label: 'Llama 3.2 (3B)', provider: 'Ollama' },
   { value: 'ollama:llama3.1:8b', label: 'Llama 3.1 (8B)', provider: 'Ollama' },
   { value: 'ollama:mistral', label: 'Mistral 7B', provider: 'Ollama' },
