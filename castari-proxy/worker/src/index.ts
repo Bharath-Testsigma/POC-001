@@ -62,6 +62,12 @@ export default {
         return await proxyAnthropic(body, request, authHeader.value, config.anthropicBaseUrl);
       }
 
+      const upstreamBaseUrl =
+        provider === 'gemini' ? config.geminiBaseUrl :
+        provider === 'openai' ? config.openAiBaseUrl :
+        config.openRouterBaseUrl;
+      const isGemini = provider === 'gemini';
+
       return await handleOpenRouter({
         body,
         wireModel,
@@ -70,6 +76,8 @@ export default {
         config,
         reasoning,
         webSearch,
+        upstreamBaseUrl,
+        isGemini,
       });
     } catch (error) {
       return errorResponse(error);
@@ -93,17 +101,32 @@ function extractApiKey(headers: Headers): { value: string; type: 'x-api-key' | '
   throw authenticationError('Missing API key');
 }
 
+const UPSTREAM_TIMEOUT_MS = 30_000;
+
 async function proxyAnthropic(
   body: AnthropicRequest,
   request: Request,
   apiKey: string,
   upstreamUrl: string,
 ): Promise<Response> {
-  const upstreamResp = await fetch(upstreamUrl, {
-    method: 'POST',
-    headers: buildAnthropicHeaders(request.headers, apiKey),
-    body: JSON.stringify(body),
-  });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), UPSTREAM_TIMEOUT_MS);
+  let upstreamResp: Response;
+  try {
+    upstreamResp = await fetch(upstreamUrl, {
+      method: 'POST',
+      headers: buildAnthropicHeaders(request.headers, apiKey),
+      body: JSON.stringify(body),
+      signal: abort.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw invalidRequest('Anthropic upstream timed out after 30s');
+    }
+    throw err;
+  }
+  clearTimeout(timer);
   if (!upstreamResp.ok) {
     const text = await upstreamResp.text();
     return new Response(text || JSON.stringify({ error: 'Anthropic upstream error' }), {
@@ -133,6 +156,8 @@ interface OpenRouterContext {
   config: WorkerConfig;
   reasoning?: CastariReasoningConfig;
   webSearch?: WebSearchOptions;
+  upstreamBaseUrl?: string;
+  isGemini?: boolean;
 }
 
 async function handleOpenRouter(ctx: OpenRouterContext): Promise<Response> {
@@ -142,19 +167,35 @@ async function handleOpenRouter(ctx: OpenRouterContext): Promise<Response> {
     webSearch: ctx.webSearch,
   });
 
-  const upstreamResp = await fetch(ctx.config.openRouterBaseUrl, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${ctx.apiKey}`,
-    },
-    body: JSON.stringify(openRouterRequest),
-  });
+  const targetUrl = ctx.upstreamBaseUrl ?? ctx.config.openRouterBaseUrl;
+
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), UPSTREAM_TIMEOUT_MS);
+  let upstreamResp: Response;
+  try {
+    upstreamResp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ctx.apiKey}`,
+      },
+      body: JSON.stringify(openRouterRequest),
+      signal: abort.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw invalidRequest(`Upstream timed out after 30s — model: ${ctx.wireModel}`);
+    }
+    throw err;
+  }
+  // Clear the connect timeout once headers arrive; the stream body may run longer.
+  clearTimeout(timer);
 
   if (ctx.body.stream) {
     if (!upstreamResp.ok) {
       const payload = await upstreamResp.text();
-      throw invalidRequest('OpenRouter streaming error', { status: upstreamResp.status, body: payload });
+      throw invalidRequest('Upstream streaming error', { status: upstreamResp.status, body: payload });
     }
     return streamOpenRouterToAnthropic(upstreamResp, { originalModel: ctx.originalModel });
   }
