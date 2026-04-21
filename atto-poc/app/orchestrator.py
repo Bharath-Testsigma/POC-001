@@ -95,20 +95,11 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                 api_base=settings.openrouter_api_base,
                 api_key=settings.openrouter_api_key,
             )
-        except Exception as primary_err:
-            logger.warning(f"Model {active_model} failed: {primary_err}. Trying fallback.")
-            try:
-                response = await litellm.acompletion(
-                    model=settings.fallback_model,
-                    messages=messages,
-                    tools=TOOL_DEFINITIONS,
-                    tool_choice="auto",
-                    api_base=settings.openrouter_api_base,
-                    api_key=settings.openrouter_api_key,
-                )
-                active_model = settings.fallback_model
-            except Exception as fallback_err:
-                raise RuntimeError(f"Both models failed. Primary: {primary_err}. Fallback: {fallback_err}")
+        except Exception as err:
+            logger.error(
+                f"[{request.conversation_id}] Model '{active_model}' failed on iteration {iteration}: {err}"
+            )
+            raise RuntimeError(f"Model '{active_model}' failed: {err}") from err
 
         tracer.log_llm_call(
             model=active_model,
@@ -147,8 +138,18 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
             tool_name = tool_call.function.name
             try:
                 args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
+            except json.JSONDecodeError as parse_err:
+                logger.warning(
+                    f"[{request.conversation_id}] Could not parse args for tool '{tool_name}': {parse_err} "
+                    f"| raw='{tool_call.function.arguments[:200]}'"
+                )
+                tool_results.append({
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": f"ERROR: Model sent malformed JSON arguments for tool '{tool_name}': {parse_err}",
+                })
+                continue
 
             tracer.log_tool_call(tool_name, args, "")
 
