@@ -36,6 +36,9 @@ export function streamOpenRouterToAnthropic(upstream: Response, options: StreamO
           role: 'assistant',
           model: options.originalModel,
           content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 1 },
         },
       });
 
@@ -43,6 +46,8 @@ export function streamOpenRouterToAnthropic(upstream: Response, options: StreamO
       let textBlockOpen = false;
       let contentIndex = 0;
       let accumulatedStopReason: string | null = null;
+      let accumulatedInputTokens: number | null = null;
+      let accumulatedOutputTokens: number | null = null;
       const toolBlocks = new Map<string, ToolBlockState>();
 
       const flushTextBlockStop = () => {
@@ -120,16 +125,8 @@ export function streamOpenRouterToAnthropic(upstream: Response, options: StreamO
         }
 
         if (json.usage) {
-          send('message_delta', {
-            type: 'message_delta',
-            delta: {
-              usage: {
-                input_tokens: json.usage.prompt_tokens,
-                output_tokens: json.usage.completion_tokens,
-                reasoning_tokens: json.usage.reasoning_tokens,
-              },
-            },
-          });
+          accumulatedInputTokens = json.usage.prompt_tokens ?? null;
+          accumulatedOutputTokens = json.usage.completion_tokens ?? null;
         }
       };
 
@@ -148,26 +145,45 @@ export function streamOpenRouterToAnthropic(upstream: Response, options: StreamO
         }
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let boundary = buffer.indexOf('\n\n');
-        while (boundary !== -1) {
-          const rawEvent = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          processEvent(rawEvent.trim());
-          boundary = buffer.indexOf('\n\n');
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary !== -1) {
+            const rawEvent = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            processEvent(rawEvent.trim());
+            boundary = buffer.indexOf('\n\n');
+          }
         }
+      } catch (streamErr) {
+        const msg = streamErr instanceof Error ? streamErr.message : 'Stream read error';
+        send('error', { type: 'error', error: { type: 'stream_error', message: msg } });
+        controller.close();
+        return;
       }
 
       flushTextBlockStop();
       finalizeToolBlocks();
 
-      send('message_stop', {
-        type: 'message_stop',
-        stop_reason: accumulatedStopReason ?? 'end_turn',
-      });
+      // Emit message_delta with stop_reason + usage at top level (Anthropic format)
+      const messageDelta: Record<string, unknown> = {
+        type: 'message_delta',
+        delta: {
+          stop_reason: accumulatedStopReason ?? 'end_turn',
+          stop_sequence: null,
+        },
+      };
+      if (accumulatedInputTokens != null || accumulatedOutputTokens != null) {
+        messageDelta.usage = {
+          input_tokens: accumulatedInputTokens ?? 0,
+          output_tokens: accumulatedOutputTokens ?? 0,
+        };
+      }
+      send('message_delta', messageDelta);
+      send('message_stop', { type: 'message_stop' });
       controller.close();
 
       function processEvent(raw: string) {
@@ -184,7 +200,10 @@ export function streamOpenRouterToAnthropic(upstream: Response, options: StreamO
           try {
             const parsed = JSON.parse(data);
             handleChunk(parsed);
-          } catch (error) {
+          } catch (parseErr) {
+            // Malformed chunk from upstream — emit a visible error event
+            const msg = parseErr instanceof Error ? parseErr.message : 'JSON parse error';
+            send('error', { type: 'error', error: { type: 'stream_parse_error', message: `Upstream sent invalid JSON: ${msg}`, raw: data.slice(0, 200) } });
           }
         }
       }
