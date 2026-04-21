@@ -8,6 +8,13 @@ export const ATTO_MODEL_OPTIONS = [
   // OpenRouter free tier (no credits needed)
   { value: 'or:openai/gpt-oss-20b:free', label: 'GPT-OSS 20B (free)', provider: 'OpenAI' },
 
+  // Ollama — local models (requires: ollama serve + ollama pull <model>)
+  { value: 'ollama:llama3.2', label: 'Llama 3.2 (3B)', provider: 'Ollama' },
+  { value: 'ollama:llama3.1:8b', label: 'Llama 3.1 (8B)', provider: 'Ollama' },
+  { value: 'ollama:mistral', label: 'Mistral 7B', provider: 'Ollama' },
+  { value: 'ollama:qwen2.5:7b', label: 'Qwen 2.5 (7B)', provider: 'Ollama' },
+  { value: 'ollama:phi4', label: 'Phi-4 (14B)', provider: 'Ollama' },
+
   // OpenRouter paid models (require credits at openrouter.ai/settings/credits)
   { value: 'or:google/gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash', provider: 'Google' },
   { value: 'or:google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },

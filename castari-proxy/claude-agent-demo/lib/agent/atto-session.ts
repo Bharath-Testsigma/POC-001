@@ -80,10 +80,15 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
   const policy = buildPolicy('atto');
   const mcpServers = buildMcpServers();
 
+  const isOllama = config.model.startsWith('ollama:');
+  const baseUrl = isOllama
+    ? `${process.env.NEXT_SERVER_URL ?? 'http://localhost:3000'}/api/ollama`
+    : env.CASTARI_WORKER_URL;
+
   const envOverrides: Record<string, string> = {
     ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-    ANTHROPIC_BASE_URL: env.CASTARI_WORKER_URL,
-    CASTARI_GATEWAY_URL: env.CASTARI_WORKER_URL,
+    ANTHROPIC_BASE_URL: baseUrl,
+    CASTARI_GATEWAY_URL: baseUrl,
   };
 
   if (env.OPENROUTER_API_KEY) envOverrides.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;

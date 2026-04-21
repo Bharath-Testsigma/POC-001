@@ -16,7 +16,13 @@ const requestSchema = z.object({
 });
 
 function humaniseAgentError(raw: string, model: string): string {
+  if (raw.includes('Cannot reach Ollama') || raw.includes('ollama serve')) {
+    return `Ollama is not running. Start it with: ollama serve — then reload and try again.`;
+  }
   if (raw.includes('exit code 1') || raw.includes('exited with code 1')) {
+    if (model.startsWith('ollama:')) {
+      return `Ollama model failed. Make sure Ollama is running (ollama serve) and the model is pulled (ollama pull ${model.slice(7)}).`;
+    }
     if (model.startsWith('or:')) {
       return `The model failed to respond. Your OpenRouter account likely needs credits — add them at openrouter.ai/settings/credits. To use a free model, select "GPT-OSS 20B (free)" from the dropdown, or switch to a Claude model.`;
     }

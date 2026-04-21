@@ -49,6 +49,7 @@ const PROVIDER_COLORS: Record<string, string> = {
   OpenAI: '#10a37f',
   Meta: '#0866ff',
   Mistral: '#f54e42',
+  Ollama: '#8b5cf6',
 };
 
 const EXAMPLE_PROMPTS = [
