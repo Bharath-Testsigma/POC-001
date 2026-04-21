@@ -112,7 +112,7 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
     resume: config.sessionId,
   };
 
-  if (config.thinkingBudget && config.thinkingBudget > 0) {
+  if (!isOllama && config.thinkingBudget && config.thinkingBudget > 0) {
     options.maxThinkingTokens = config.thinkingBudget;
   }
 
