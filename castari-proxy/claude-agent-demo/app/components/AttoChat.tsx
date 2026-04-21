@@ -320,6 +320,14 @@ export function AttoChat() {
   const selectedModelInfo = ATTO_MODEL_OPTIONS.find((m) => m.value === model);
   const selectedFileContent = generatedFiles.find((f) => f.name === selectedFile)?.content;
   const providerColor = selectedModelInfo ? PROVIDER_COLORS[selectedModelInfo.provider] ?? '#7c8fb3' : '#7c8fb3';
+  const modelSupportsThinking = selectedModelInfo?.thinking ?? false;
+  const modelToolUse = selectedModelInfo?.toolUse ?? 'full';
+
+  const TOOL_USE_BADGE: Record<string, { label: string; color: string }> = {
+    full:    { label: '✓ Tools', color: '#16a34a' },
+    limited: { label: '⚠ Tools limited', color: '#d97706' },
+    poor:    { label: '✗ Tools unreliable', color: '#dc2626' },
+  };
 
   return (
     <div className="ac-shell">
@@ -357,6 +365,30 @@ export function AttoChat() {
               </span>
             )}
           </div>
+          {selectedModelInfo && (
+            <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  fontSize: '0.7rem', fontWeight: 600, padding: '0.1rem 0.45rem',
+                  borderRadius: '999px', border: `1px solid ${TOOL_USE_BADGE[modelToolUse].color}44`,
+                  color: TOOL_USE_BADGE[modelToolUse].color,
+                  background: `${TOOL_USE_BADGE[modelToolUse].color}11`,
+                }}
+              >
+                {TOOL_USE_BADGE[modelToolUse].label}
+              </span>
+              {modelSupportsThinking && (
+                <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.1rem 0.45rem', borderRadius: '999px', border: '1px solid #6d28d944', color: '#6d28d9', background: '#6d28d911' }}>
+                  💡 Thinking
+                </span>
+              )}
+            </div>
+          )}
+          {selectedModelInfo?.note && modelToolUse !== 'full' && (
+            <p style={{ fontSize: '0.7rem', color: '#d97706', marginTop: '0.3rem', lineHeight: 1.4 }}>
+              {selectedModelInfo.note}
+            </p>
+          )}
         </div>
 
         {/* App type */}
@@ -371,15 +403,17 @@ export function AttoChat() {
 
         {/* Thinking (Claude only) */}
         <div className="ac-section">
-          <label className="ac-toggle">
+          <label className="ac-toggle" title={!modelSupportsThinking ? 'Extended thinking is only supported on Claude models' : undefined}>
             <input
               type="checkbox"
-              checked={thinkingEnabled}
+              checked={thinkingEnabled && modelSupportsThinking}
               onChange={(e) => setThinkingEnabled(e.target.checked)}
-              disabled={pending}
+              disabled={pending || !modelSupportsThinking}
             />
             <span className="ac-toggle-track" />
-            <span className="ac-toggle-label">Extended thinking</span>
+            <span className="ac-toggle-label" style={{ opacity: modelSupportsThinking ? 1 : 0.4 }}>
+              Extended thinking{!modelSupportsThinking ? ' (Claude only)' : ''}
+            </span>
           </label>
 
           {thinkingEnabled && (
