@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ResultEvent, UIEvent } from '@/lib/types/events';
-import { ATTO_MODEL_OPTIONS, APP_TYPE_OPTIONS } from '@/lib/agent/atto-config';
+import { ATTO_MODEL_OPTIONS, PORTKEY_MODEL_OPTIONS, APP_TYPE_OPTIONS, type ProxyMode } from '@/lib/agent/atto-config';
 
 /* ------------------------------------------------------------------ types */
 
@@ -66,6 +66,7 @@ export function AttoChat() {
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proxyMode, setProxyMode] = useState<ProxyMode>('cloudflare');
   const [model, setModel] = useState<string>(ATTO_MODEL_OPTIONS[0].value);
   const [appType, setAppType] = useState<string>(APP_TYPE_OPTIONS[0].value);
   const [usage, setUsage] = useState<ResultEvent['data'] | null>(null);
@@ -317,7 +318,8 @@ export function AttoChat() {
     setTimeout(() => setCopied(false), 1500);
   }, []);
 
-  const selectedModelInfo = ATTO_MODEL_OPTIONS.find((m) => m.value === model);
+  const activeModelOptions = proxyMode === 'portkey' ? PORTKEY_MODEL_OPTIONS : ATTO_MODEL_OPTIONS;
+  const selectedModelInfo = activeModelOptions.find((m) => m.value === model);
   const selectedFileContent = generatedFiles.find((f) => f.name === selectedFile)?.content;
   const providerColor = selectedModelInfo ? PROVIDER_COLORS[selectedModelInfo.provider] ?? '#7c8fb3' : '#7c8fb3';
   const modelSupportsThinking = selectedModelInfo?.thinking ?? false;
@@ -338,6 +340,35 @@ export function AttoChat() {
           <span className="ac-brand-sub">Test Case Generator</span>
         </div>
 
+        {/* Proxy mode toggle */}
+        <div className="ac-section">
+          <span className="ac-section-label">Proxy Mode</span>
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            {(['cloudflare', 'portkey'] as ProxyMode[]).map((mode) => {
+              const active = proxyMode === mode;
+              const color = mode === 'portkey' ? '#8b5cf6' : '#3b82f6';
+              const label = mode === 'cloudflare' ? '☁ Cloudflare' : '🔑 Portkey';
+              const first = mode === 'cloudflare' ? ATTO_MODEL_OPTIONS[0].value : PORTKEY_MODEL_OPTIONS[0].value;
+              return (
+                <button
+                  key={mode}
+                  disabled={pending}
+                  onClick={() => { setProxyMode(mode); setModel(first); }}
+                  style={{
+                    flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem', fontWeight: 600,
+                    borderRadius: '6px', border: `1px solid ${active ? color : '#334155'}`,
+                    background: active ? `${color}18` : 'transparent',
+                    color: active ? color : '#94a3b8',
+                    cursor: pending ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Model selector */}
         <div className="ac-section">
           <span className="ac-section-label">AI Model</span>
@@ -348,9 +379,9 @@ export function AttoChat() {
               disabled={pending}
               className="ac-select"
             >
-              {Array.from(new Set(ATTO_MODEL_OPTIONS.map((o) => o.provider))).map((provider) => (
+              {Array.from(new Set(activeModelOptions.map((o) => o.provider))).map((provider) => (
                 <optgroup key={provider} label={provider === 'Ollama' ? '⚡ Local (Ollama)' : provider}>
-                  {ATTO_MODEL_OPTIONS.filter((o) => o.provider === provider).map((opt) => (
+                  {activeModelOptions.filter((o) => o.provider === provider).map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </optgroup>

@@ -81,8 +81,11 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
   const mcpServers = buildMcpServers();
 
   const isOllama = config.model.startsWith('ollama:');
+  const isPortkey = config.model.startsWith('pk:');
   const baseUrl = isOllama
     ? `${process.env.NEXT_SERVER_URL ?? 'http://localhost:3000'}/api/ollama`
+    : isPortkey
+    ? 'https://api.portkey.ai/v1'
     : env.CASTARI_WORKER_URL;
 
   const envOverrides: Record<string, string> = {
@@ -99,6 +102,9 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
     envOverrides.OPENAI_API_KEY = (env as Record<string, string | undefined>).OPENAI_API_KEY!;
   }
   if (env.CASTARI_WORKER_TOKEN) envOverrides.X_WORKER_TOKEN = env.CASTARI_WORKER_TOKEN;
+  if ((env as Record<string, string | undefined>).PORTKEY_API_KEY) {
+    envOverrides.PORTKEY_API_KEY = (env as Record<string, string | undefined>).PORTKEY_API_KEY!;
+  }
 
   const options: Options = {
     cwd: PROJECT_CWD,

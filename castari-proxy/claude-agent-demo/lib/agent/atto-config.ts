@@ -4,6 +4,7 @@
 // partial JSON; 'poor' = frequently fails to use tools correctly.
 // thinking: whether the model supports Claude-style extended thinking / reasoning blocks.
 export type ToolUseCapability = 'full' | 'limited' | 'poor';
+export type ProxyMode = 'cloudflare' | 'portkey';
 
 export interface AttoModelOption {
   value: string;
@@ -13,6 +14,22 @@ export interface AttoModelOption {
   thinking: boolean;
   note?: string;
 }
+
+export const PORTKEY_MODEL_OPTIONS: AttoModelOption[] = [
+  // Anthropic via Portkey
+  { value: 'pk:anthropic/claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'Anthropic', toolUse: 'full', thinking: true },
+  { value: 'pk:anthropic/claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'Anthropic', toolUse: 'full', thinking: false },
+
+  // OpenAI via Portkey
+  { value: 'pk:openai/gpt-4o', label: 'GPT-4o', provider: 'OpenAI', toolUse: 'full', thinking: false },
+  { value: 'pk:openai/gpt-4o-mini', label: 'GPT-4o Mini', provider: 'OpenAI', toolUse: 'full', thinking: false },
+  { value: 'pk:openai/gpt-4.1', label: 'GPT-4.1', provider: 'OpenAI', toolUse: 'full', thinking: false },
+  { value: 'pk:openai/gpt-4.1-mini', label: 'GPT-4.1 Mini', provider: 'OpenAI', toolUse: 'full', thinking: false },
+
+  // Google via Portkey
+  { value: 'pk:google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'Google', toolUse: 'full', thinking: false },
+  { value: 'pk:google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google', toolUse: 'full', thinking: false },
+];
 
 export const ATTO_MODEL_OPTIONS: AttoModelOption[] = [
   // Anthropic — direct API, no credits needed

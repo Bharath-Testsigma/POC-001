@@ -26,6 +26,9 @@ function humaniseAgentError(raw: string, model: string): string {
     if (model.startsWith('or:')) {
       return `The model failed to respond. Your OpenRouter account likely needs credits — add them at openrouter.ai/settings/credits. To use a free model, select "GPT-OSS 20B (free)" from the dropdown, or switch to a Claude model.`;
     }
+    if (model.startsWith('pk:')) {
+      return `Portkey request failed. Check that PORTKEY_API_KEY is set and the provider API key (Anthropic/OpenAI/Gemini) is valid.`;
+    }
     return `The agent process crashed (exit code 1). Check that your API key is valid and try again.`;
   }
   return raw;
