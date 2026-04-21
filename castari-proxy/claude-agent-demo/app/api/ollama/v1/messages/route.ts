@@ -19,20 +19,28 @@ type AnthropicTool = { name: string; description?: string; input_schema: Record<
 type AnthropicRequest = {
   model: string;
   messages: AnthropicMessage[];
-  system?: string | { type: string; text: string }[];
+  system?: string | { type: string; text: string; [k: string]: unknown }[];
   max_tokens?: number;
   stream?: boolean;
   tools?: AnthropicTool[];
 };
 
+type OllamaToolCall = {
+  id?: string;
+  function: { name: string; arguments: Record<string, unknown> | string };
+};
 type OllamaMessage = {
   role: string;
   content: string | null;
-  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+  tool_calls?: OllamaToolCall[];
   tool_call_id?: string;
 };
+type OllamaResponse = {
+  message: { role: string; content?: string | null; tool_calls?: OllamaToolCall[] };
+  done_reason?: string;
+};
 
-/* ------------------------------------------------------------------ translators */
+/* ------------------------------------------------------------------ request translation */
 
 function systemText(system: AnthropicRequest['system']): string {
   if (!system) return '';
@@ -41,7 +49,10 @@ function systemText(system: AnthropicRequest['system']): string {
 }
 
 function blockText(blocks: ContentBlock[]): string {
-  return blocks.filter(b => b.type === 'text').map(b => (b as { type: 'text'; text: string }).text).join('\n');
+  return blocks
+    .filter(b => b.type === 'text')
+    .map(b => (b as { type: 'text'; text: string }).text)
+    .join('\n');
 }
 
 function toOllamaMessages(messages: AnthropicMessage[], system: AnthropicRequest['system']): OllamaMessage[] {
@@ -57,16 +68,20 @@ function toOllamaMessages(messages: AnthropicMessage[], system: AnthropicRequest
 
     const blocks = msg.content as ContentBlock[];
 
-    // User message with tool_results → one "tool" role message per result
+    // User message with tool_results → one tool role message per result
     if (msg.role === 'user' && blocks.some(b => b.type === 'tool_result')) {
       for (const block of blocks) {
         if (block.type === 'tool_result') {
-          const content = typeof block.content === 'string'
-            ? block.content
-            : Array.isArray(block.content) ? blockText(block.content as ContentBlock[]) : '';
-          result.push({ role: 'tool', tool_call_id: block.tool_use_id, content });
-        } else if (block.type === 'text' && (block as { type: 'text'; text: string }).text) {
-          result.push({ role: msg.role, content: (block as { type: 'text'; text: string }).text });
+          const content =
+            typeof block.content === 'string'
+              ? block.content
+              : Array.isArray(block.content)
+              ? blockText(block.content as ContentBlock[])
+              : '';
+          result.push({ role: 'tool', content });
+        } else if (block.type === 'text') {
+          const text = (block as { type: 'text'; text: string }).text;
+          if (text) result.push({ role: msg.role, content: text });
         }
       }
       continue;
@@ -74,16 +89,15 @@ function toOllamaMessages(messages: AnthropicMessage[], system: AnthropicRequest
 
     // Assistant message with tool_use → tool_calls
     if (msg.role === 'assistant') {
-      const toolUseBlocks = blocks.filter(b => b.type === 'tool_use') as Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }>;
-      if (toolUseBlocks.length) {
-        const text = blockText(blocks) || null;
+      const toolUse = blocks.filter(b => b.type === 'tool_use') as Array<{
+        type: 'tool_use'; id: string; name: string; input: Record<string, unknown>;
+      }>;
+      if (toolUse.length) {
         result.push({
           role: 'assistant',
-          content: text,
-          tool_calls: toolUseBlocks.map(b => ({
-            id: b.id,
-            type: 'function' as const,
-            function: { name: b.name, arguments: JSON.stringify(b.input) },
+          content: blockText(blocks) || null,
+          tool_calls: toolUse.map(b => ({
+            function: { name: b.name, arguments: b.input },
           })),
         });
         continue;
@@ -104,89 +118,60 @@ function toOllamaTools(tools?: AnthropicTool[]) {
   }));
 }
 
-/* ------------------------------------------------------------------ streaming */
+/* ------------------------------------------------------------------ response translation */
 
 function sse(event: string, data: unknown): Uint8Array {
   return new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-async function streamOllamaToAnthropic(
-  ollamaBody: ReadableStream<Uint8Array>,
-  originalModel: string,
-): Promise<ReadableStream<Uint8Array>> {
+function argsString(args: Record<string, unknown> | string): string {
+  return typeof args === 'string' ? args : JSON.stringify(args);
+}
+
+function buildAnthropicStream(ollamaResp: OllamaResponse, originalModel: string): ReadableStream<Uint8Array> {
   const msgId = `msg_oll_${Date.now()}`;
-  const decoder = new TextDecoder();
+  const { message } = ollamaResp;
+  const textContent = message.content ?? '';
+  const rawToolCalls = message.tool_calls ?? [];
+
+  // Generate stable IDs for tool calls (used by the agent to match results)
+  const ts = Date.now();
+  const toolCalls = rawToolCalls.map((tc, i) => ({
+    id: `toolu_${ts}_${i}`,
+    name: tc.function.name,
+    argsStr: argsString(tc.function.arguments),
+  }));
 
   return new ReadableStream({
-    async start(controller) {
+    start(controller) {
       controller.enqueue(sse('message_start', {
         type: 'message_start',
-        message: { id: msgId, type: 'message', role: 'assistant', model: originalModel, content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } },
+        message: {
+          id: msgId, type: 'message', role: 'assistant', model: originalModel,
+          content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 },
+        },
       }));
+
+      // Text block (always emitted even if empty, to satisfy SDK state machine)
       controller.enqueue(sse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }));
-      controller.enqueue(sse('ping', { type: 'ping' }));
-
-      let buffer = '';
-      let outputTokens = 0;
-      // Collect tool calls; Ollama streams them in the final done=true chunk
-      let toolCalls: Array<{ id: string; name: string; args: string }> = [];
-
-      const reader = ollamaBody.getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            let chunk: Record<string, unknown>;
-            try { chunk = JSON.parse(trimmed); } catch { continue; }
-
-            const msg = chunk.message as Record<string, unknown> | undefined;
-
-            // Tool calls arrive in the done chunk
-            if (Array.isArray(msg?.tool_calls) && (msg.tool_calls as unknown[]).length) {
-              toolCalls = (msg.tool_calls as Array<{ id: string; type: string; function: { name: string; arguments: string } }>).map(tc => ({
-                id: tc.id,
-                name: tc.function.name,
-                args: tc.function.arguments,
-              }));
-            }
-
-            // Streamed text delta
-            if (typeof msg?.content === 'string' && msg.content) {
-              outputTokens++;
-              controller.enqueue(sse('content_block_delta', {
-                type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: msg.content },
-              }));
-            }
-
-            if (chunk.done) {
-              controller.enqueue(sse('content_block_stop', { type: 'content_block_stop', index: 0 }));
-
-              // Emit tool_use blocks after the text block
-              for (let i = 0; i < toolCalls.length; i++) {
-                const tc = toolCalls[i];
-                const idx = i + 1;
-                controller.enqueue(sse('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'tool_use', id: tc.id, name: tc.name, input: {} } }));
-                controller.enqueue(sse('content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'input_json_delta', partial_json: tc.args } }));
-                controller.enqueue(sse('content_block_stop', { type: 'content_block_stop', index: idx }));
-              }
-
-              const stopReason = toolCalls.length ? 'tool_use' : (chunk.done_reason === 'length' ? 'max_tokens' : 'end_turn');
-              controller.enqueue(sse('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: outputTokens } }));
-              controller.enqueue(sse('message_stop', { type: 'message_stop' }));
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-        controller.close();
+      if (textContent) {
+        controller.enqueue(sse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: textContent } }));
       }
+      controller.enqueue(sse('content_block_stop', { type: 'content_block_stop', index: 0 }));
+
+      // Tool use blocks
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i];
+        const idx = i + 1;
+        controller.enqueue(sse('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'tool_use', id: tc.id, name: tc.name, input: {} } }));
+        controller.enqueue(sse('content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'input_json_delta', partial_json: tc.argsStr } }));
+        controller.enqueue(sse('content_block_stop', { type: 'content_block_stop', index: idx }));
+      }
+
+      const stopReason = toolCalls.length ? 'tool_use' : (ollamaResp.done_reason === 'length' ? 'max_tokens' : 'end_turn');
+      controller.enqueue(sse('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 0 } }));
+      controller.enqueue(sse('message_stop', { type: 'message_stop' }));
+      controller.close();
     },
   });
 }
@@ -202,10 +187,11 @@ export async function POST(req: NextRequest) {
   }
 
   const ollamaModel = body.model.startsWith('ollama:') ? body.model.slice(7) : body.model;
+
   const ollamaPayload: Record<string, unknown> = {
     model: ollamaModel,
     messages: toOllamaMessages(body.messages, body.system),
-    stream: body.stream ?? false,
+    stream: false, // always non-streaming; we emit SSE ourselves for reliability
     options: { ...(body.max_tokens ? { num_predict: body.max_tokens } : {}) },
   };
 
@@ -231,33 +217,33 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: `Ollama error (${ollamaResp.status}): ${text}` }, { status: ollamaResp.status });
   }
 
-  // Streaming response
+  const data = await ollamaResp.json() as OllamaResponse;
+
   if (body.stream) {
-    if (!ollamaResp.body) return Response.json({ error: 'No response body from Ollama' }, { status: 502 });
-    const stream = await streamOllamaToAnthropic(ollamaResp.body, body.model);
+    const stream = buildAnthropicStream(data, body.model);
     return new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
   }
 
-  // Non-streaming response
-  const data = await ollamaResp.json() as { message: { role: string; content?: string; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> }; done_reason?: string };
+  // Non-streaming Anthropic response
+  const textContent = data.message.content ?? '';
+  const rawToolCalls = data.message.tool_calls ?? [];
+  const ts = Date.now();
   const content: unknown[] = [];
 
-  if (data.message.tool_calls?.length) {
-    for (const tc of data.message.tool_calls) {
-      let input: unknown = {};
-      try { input = JSON.parse(tc.function.arguments); } catch {}
-      content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input });
-    }
-  }
-  if (data.message.content) content.push({ type: 'text', text: data.message.content });
+  if (textContent) content.push({ type: 'text', text: textContent });
+  rawToolCalls.forEach((tc, i) => {
+    let input: unknown = {};
+    try { input = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments; } catch {}
+    content.push({ type: 'tool_use', id: `toolu_${ts}_${i}`, name: tc.function.name, input });
+  });
 
   return Response.json({
-    id: `msg_oll_${Date.now()}`,
+    id: `msg_oll_${ts}`,
     type: 'message',
     role: 'assistant',
     model: body.model,
     content,
-    stop_reason: data.message.tool_calls?.length ? 'tool_use' : 'end_turn',
+    stop_reason: rawToolCalls.length ? 'tool_use' : 'end_turn',
     stop_sequence: null,
     usage: { input_tokens: 0, output_tokens: 0 },
   });
