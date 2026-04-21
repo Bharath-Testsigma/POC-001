@@ -50,16 +50,27 @@ export function resolveProvider(
   const originalModel = body.model;
   const provider = headers.provider ?? inferProviderFromModel(originalModel);
   if (!provider) throw invalidRequest(`Unable to infer provider for model ${originalModel}`);
-  const wireModel = provider === 'openrouter'
-    ? resolveOpenRouterModel(headers.wireModel ?? originalModel, config.defaultOpenRouterVendor)
-    : originalModel;
+  let wireModel: string;
+  if (provider === 'openrouter') {
+    wireModel = resolveOpenRouterModel(headers.wireModel ?? originalModel, config.defaultOpenRouterVendor);
+  } else if (provider === 'gemini') {
+    const raw = headers.wireModel ?? originalModel;
+    wireModel = raw.startsWith('g:') ? raw.slice(2) : raw;
+  } else if (provider === 'openai') {
+    const raw = headers.wireModel ?? originalModel;
+    wireModel = raw.startsWith('o:') ? raw.slice(2) : raw;
+  } else {
+    wireModel = originalModel;
+  }
   return { provider, wireModel, originalModel };
 }
 
 function inferProviderFromModel(model: string): Provider | undefined {
   const normalized = model.toLowerCase();
   if (normalized.startsWith('claude') || normalized.startsWith('anthropic/')) return 'anthropic';
-  if (normalized.startsWith('or:') || normalized.startsWith('openrouter/') || normalized.startsWith('openai/')) return 'openrouter';
+  if (normalized.startsWith('or:') || normalized.startsWith('openrouter/')) return 'openrouter';
+  if (normalized.startsWith('g:') || normalized.startsWith('gemini/') || normalized.startsWith('gemini-')) return 'gemini';
+  if (normalized.startsWith('o:')) return 'openai';
   return 'anthropic';
 }
 
