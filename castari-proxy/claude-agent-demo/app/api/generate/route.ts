@@ -15,6 +15,16 @@ const requestSchema = z.object({
   thinkingBudget: z.number().int().min(0).max(64000).optional(),
 });
 
+function humaniseAgentError(raw: string, model: string): string {
+  if (raw.includes('exit code 1') || raw.includes('exited with code 1')) {
+    if (model.startsWith('or:')) {
+      return `The model failed to respond. Your OpenRouter account likely needs credits — add them at openrouter.ai/settings/credits. To use a free model, select "GPT-OSS 20B (free)" from the dropdown, or switch to a Claude model.`;
+    }
+    return `The agent process crashed (exit code 1). Check that your API key is valid and try again.`;
+  }
+  return raw;
+}
+
 export async function POST(req: NextRequest) {
   let body: z.infer<typeof requestSchema>;
   try {
@@ -55,7 +65,8 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (error) {
-        const msg = error instanceof Error ? error.message : 'Unexpected error';
+        const raw = error instanceof Error ? error.message : 'Unexpected error';
+        const msg = humaniseAgentError(raw, model);
         const errEvent: UIEvent = { type: 'error', data: { message: msg } };
         controller.enqueue(encoder.encode(JSON.stringify(errEvent) + '\n'));
       } finally {
