@@ -52,7 +52,6 @@ interface InterceptorContext {
   resolvedMeta?: Record<string, string>;
   portkey_sub_provider?: string;
   portkey_api_key?: string;
-  portkey_provider_api_key?: string;
 }
 
 const baseOrigins = new Set<string>();
@@ -109,12 +108,6 @@ function resolvePortkeySubProvider(model: string): string {
   return slash >= 0 ? slug.slice(0, slash) : 'anthropic';
 }
 
-function getPortkeyProviderCredential(sub: string, env: Record<string, string | undefined>): string | undefined {
-  if (sub === 'openai') return env.OPENAI_API_KEY;
-  if (sub === 'google') return env.GEMINI_API_KEY;
-  return env.ANTHROPIC_API_KEY;
-}
-
 export interface CastariInterceptorOptions { baseUrl?: string }
 
 export function installCastariInterceptor(options?: CastariInterceptorOptions): void {
@@ -161,14 +154,20 @@ export function queryCastari({
 
   let portkey_sub_provider: string | undefined;
   let portkey_api_key: string | undefined;
-  let portkey_provider_api_key: string | undefined;
 
   if (provider === 'portkey') {
     portkey_api_key = effectiveEnv.PORTKEY_API_KEY;
     if (!portkey_api_key) throw new Error('PORTKEY_API_KEY is required for pk: models');
     portkey_sub_provider = resolvePortkeySubProvider(model);
-    portkey_provider_api_key = getPortkeyProviderCredential(portkey_sub_provider, effectiveEnv);
-    // x-api-key sent by SDK goes to Portkey for its own auth
+
+    // Portkey mode must route exclusively through Portkey credentials and virtual keys.
+    // Strip raw provider credentials from the effective env so the SDK subprocess cannot
+    // read or forward OPENAI/GEMINI/ANTHROPIC provider keys for pk:* models.
+    delete effectiveEnv.OPENAI_API_KEY;
+    delete effectiveEnv.GEMINI_API_KEY;
+    delete effectiveEnv.ANTHROPIC_API_KEY;
+
+    // x-api-key sent by SDK goes to Portkey for its own auth.
     effectiveEnv.ANTHROPIC_API_KEY = portkey_api_key;
   } else {
     const credential = getCredentialsForProvider(provider, providers, effectiveEnv);
@@ -243,7 +242,6 @@ export function queryCastari({
     resolvedMeta,
     portkey_sub_provider,
     portkey_api_key,
-    portkey_provider_api_key,
   };
 
   return ctxStore.run(ctx, () => query({ prompt: prompt as any, options: workingOptions }));
@@ -266,7 +264,6 @@ function ensureInterceptorInstalled(): void {
       if (ctx.provider === 'portkey') {
         if (ctx.portkey_api_key) headers.set('x-portkey-api-key', ctx.portkey_api_key);
         if (ctx.portkey_sub_provider) headers.set('x-portkey-provider', ctx.portkey_sub_provider);
-        if (ctx.portkey_provider_api_key) headers.set('Authorization', `Bearer ${ctx.portkey_provider_api_key}`);
       } else {
         headers.set(HDR_PROVIDER, ctx.provider);
         headers.set(HDR_MODEL, ctx.originalModel);

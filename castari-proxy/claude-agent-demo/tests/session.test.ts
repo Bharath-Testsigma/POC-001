@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { buildOptions } from '@/lib/agent/session';
 
 describe('buildOptions', () => {
-  it('defaults to the haiku model when CLAUDE_MODEL is unset', () => {
+  it('defaults to the configured Sonnet model when CLAUDE_MODEL is unset', () => {
     const options = buildOptions();
-    expect(options.model).toBe('claude-haiku-4-5-20251001');
+    expect(options.model).toBe('claude-sonnet-4-5-20250929');
   });
 
   it('sets resume when a session id is provided', () => {

@@ -2,11 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { ATTO_WORKSPACE } from '@/lib/agent/atto-session';
+import { enforceInternalRouteAccess } from '@/lib/security/internal-routes';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const accessDenied = enforceInternalRouteAccess(req);
+  if (accessDenied) return accessDenied;
+
   try {
     fs.mkdirSync(ATTO_WORKSPACE, { recursive: true });
     const files = fs
@@ -25,6 +29,9 @@ export async function GET() {
 }
 
 export async function DELETE(_req: NextRequest) {
+  const accessDenied = enforceInternalRouteAccess(_req);
+  if (accessDenied) return accessDenied;
+
   try {
     if (fs.existsSync(ATTO_WORKSPACE)) {
       fs.rmSync(ATTO_WORKSPACE, { recursive: true, force: true });

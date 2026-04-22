@@ -1,370 +1,558 @@
 # POC-001 — Atto AI Test Case Generator
 
-A proof-of-concept for Testsigma's **Atto** system — an AI agent that turns a plain-English request into structured XML test case files.
+Atto is a proof-of-concept agent application that turns plain-English requests into structured XML test case files.
 
-**The core idea:** use Claude's API format as the single interface, but transparently route requests to _any_ AI model (Claude, GPT-4o, Gemini, Llama, Mistral) through a proxy. The app never changes its code to switch models or providers — just pick a model from the dropdown.
+The application is built around one specific technical question:
 
-**Two proxy modes are supported**, toggled from the UI:
+> Can we keep the Claude Agent SDK as the agent runtime, but move model inference behind a proxy so the same agent loop can run on Claude, OpenAI, and Gemini without rewriting the app?
 
-| Mode | Gateway | Models |
-|---|---|---|
-| **Mode 1 — Cloudflare** | Your own Cloudflare Worker | Claude (direct), OpenRouter models, Google Gemini (direct), OpenAI (direct), Ollama (local) |
-| **Mode 2 — Portkey** | Portkey managed gateway | Claude, GPT-4o, Gemini via Portkey's unified API |
+This repository exists to answer that question with working code.
+
+## What This Repository Is Trying To Prove
+
+This POC is not just a demo chat UI. It is an architecture experiment.
+
+It is trying to prove that:
+
+1. The Claude Agent SDK can remain the orchestration layer even when the actual inference model is not Claude.
+2. A proxy layer can make non-Anthropic models look Anthropic-compatible enough for the SDK to keep working.
+3. Tool use, streaming, file writing, and session continuity can survive that translation layer.
+4. Model switching can become a configuration problem instead of an application rewrite.
+5. A managed gateway such as Portkey can replace a custom proxy in the common case.
+
+The business relevance is straightforward: if the agent loop remains stable while the model changes, then cost, latency, governance, and vendor choice become operational decisions rather than product rewrites.
 
 ---
 
-## How It Works
+## Why This Application Exists
 
-### Mode 1 — Cloudflare + OpenRouter
+Testsigma's Atto concept is an AI agent that receives a request such as:
 
-```
-Browser
-  │  POST /api/generate { query, model }
-  ▼
-Next.js API Route
-  │  Claude Agent SDK  (queryCastari intercepts fetch)
-  ▼
-Cloudflare Worker  (atto-proxy — your self-hosted)
-  │
-  │  reads x-castari-provider header
-  │
-  ├── model = "claude-*"         → Anthropic API (pass-through)
-  ├── model = "or:vendor/model"  → OpenRouter (translates Anthropic ↔ OpenAI format)
-  ├── model = "g:gemini-*"       → Google Gemini API (translates format)
-  └── model = "o:gpt-*"         → OpenAI API (translates format)
+```text
+Generate login test cases for a web app with happy path and invalid password coverage.
 ```
 
-The Cloudflare Worker handles all format translation between Anthropic's message schema and each provider's API — tool calls, streaming events, stop reasons, image content, everything.
+and produces XML files in a structured, tool-driven workflow.
+
+The Claude Agent SDK is a useful fit for this because it already provides:
+
+- an agent loop
+- tool calling
+- streaming events
+- session continuity
+- partial output handling
+
+The constraint is that the SDK is Anthropic-native. Left alone, it expects Anthropic-style requests and responses on `/v1/messages`.
+
+That means this repository needs a translation layer if it wants to run the same agent on non-Claude models.
+
+That translation layer is the entire point of the project.
+
+---
+
+## The Two Modes
+
+The application exposes two routing modes in the UI.
+
+| Mode | Status in this POC | What it is for | Gateway |
+|---|---|---|---|
+| **Mode 2 — Portkey** | Primary path | Managed proxy, virtual-key-based provider switching, fastest path to proving the concept | Portkey |
+| **Mode 1 — Cloudflare** | Optional alternative | Self-hosted translation layer when you want full control or want to inspect the translation logic directly | Cloudflare Worker |
+
+Mode 2 is the path this README focuses on.
+
+Mode 1 still matters because it acts as:
+
+- a fallback when you do not want a managed gateway
+- a reference implementation of the translation logic
+- a way to inspect and control the provider routing in your own infrastructure
+
+---
+
+## What Mode 2 Is Proving
+
+Mode 2 is the stronger architectural claim.
+
+It is proving that:
+
+- the Claude Agent SDK can still be the agent runtime
+- Portkey can act as the Anthropic-compatible proxy layer
+- provider switching can happen through Portkey virtual keys
+- the app can remain mostly unchanged while the inference provider changes underneath it
+
+In concrete terms:
+
+- `pk:anthropic/...` should infer through Portkey using `PORTKEY_VK_ANTHROPIC`
+- `pk:openai/...` should infer through Portkey using `PORTKEY_VK_OPENAI`
+- `pk:google/...` should infer through Portkey using `PORTKEY_VK_GOOGLE`
+
+The app should not need separate OpenAI or Gemini direct-inference logic for Mode 2.
+
+That is now the implemented behavior for the actual Mode 2 inference path.
+
+---
+
+## Important Nuance About Anthropic
+
+There is one design detail that matters:
+
+The application still expects an `ANTHROPIC_API_KEY` to be present so the current SDK startup and environment validation path can initialize cleanly.
+
+That does **not** mean Mode 2 inference is directly calling Anthropic.
+
+For `pk:*` models, the inference request is routed to Portkey and the selected provider is determined by the model prefix plus the matching virtual key.
+
+So the accurate statement is:
+
+- `ANTHROPIC_API_KEY` is still part of the current boot-time contract of the app
+- actual Mode 2 inference is routed through Portkey and the provider-specific virtual key
+
+That distinction matters because this repository is proving inference routing behavior, not claiming the SDK itself has become provider-agnostic.
+
+---
+
+## Architecture At A Glance
 
 ### Mode 2 — Portkey
 
-```
-Browser
-  │  POST /api/generate { query, model }
-  ▼
-Next.js API Route
-  │  Claude Agent SDK  (queryCastari intercepts fetch)
-  ▼
-Portkey Gateway  (managed service — api.portkey.ai)
-  │
-  │  reads x-portkey-provider header
-  │
-  ├── model = "pk:anthropic/..."  → Anthropic
-  ├── model = "pk:openai/..."     → OpenAI
-  └── model = "pk:google/..."     → Google
+```text
+Browser UI
+  -> POST /api/generate { query, model, appType }
+  -> Claude Agent SDK
+  -> queryCastari fetch interceptor
+  -> local /api/portkey/v1/messages route
+  -> Portkey /v1/messages
+  -> selected provider via Portkey virtual key
+  -> Anthropic-compatible response back to SDK
+  -> SDK executes tools and streams events to the UI
 ```
 
-Portkey exposes an Anthropic-compatible endpoint. The Claude Agent SDK sees no difference — it still talks the same language. Portkey handles translation internally and gives you a dashboard showing usage, cost, and latency across providers.
+### Mode 1 — Cloudflare
 
-### The fetch interceptor (the key mechanism)
-
-The Claude Agent SDK is designed to talk exclusively to `api.anthropic.com`. To support other providers, `queryCastari.ts` patches `globalThis.fetch` once per process:
-
+```text
+Browser UI
+  -> POST /api/generate { query, model, appType }
+  -> Claude Agent SDK
+  -> queryCastari fetch interceptor
+  -> Cloudflare Worker
+  -> target provider (Anthropic, OpenRouter, OpenAI, Gemini, Ollama)
+  -> translated Anthropic-compatible response back to SDK
+  -> SDK executes tools and streams events to the UI
 ```
-SDK calls fetch("https://<proxy>/v1/messages", body)
-         ↓
-Interceptor fires (URL matches /v1/messages)
-         ↓
-Injects routing headers (provider, model, credentials)
-         ↓
-Request forwarded to proxy (Cloudflare Worker or Portkey)
-         ↓
-Proxy routes to actual provider, translates response
-         ↓
-SDK receives Anthropic-format response — it never knew the difference
-```
-
-The app model prefix determines which proxy path is taken:
-
-| Prefix | Provider | Gateway |
-|--------|----------|---------|
-| `claude-` | Anthropic | Cloudflare (pass-through) |
-| `or:vendor/model` | OpenRouter | Cloudflare |
-| `g:gemini-*` | Google Gemini | Cloudflare |
-| `o:gpt-*` | OpenAI | Cloudflare |
-| `ollama:model` | Local Ollama | Local proxy route |
-| `pk:provider/model` | Portkey gateway | Portkey |
 
 ---
 
-## Project Structure
+## How Model Switching Works
 
+This is the core mechanism of the whole POC.
+
+The UI never changes its agent logic when you switch models. Only the model value changes.
+
+Examples:
+
+- `claude-sonnet-4-6`
+- `or:meta-llama/llama-3.3-70b-instruct`
+- `o:gpt-4o`
+- `g:gemini-2.5-pro`
+- `pk:openai/gpt-4o`
+- `pk:anthropic/claude-haiku-4-5-20251001`
+
+The routing logic uses the model prefix to decide:
+
+1. which gateway to talk to
+2. which provider the gateway should target
+3. which wire-model name the upstream provider expects
+
+The relevant logic lives in:
+
+- [`castari-proxy/src/queryCastari.ts`](castari-proxy/src/queryCastari.ts)
+- [`castari-proxy/claude-agent-demo/lib/agent/atto-session.ts`](castari-proxy/claude-agent-demo/lib/agent/atto-session.ts)
+- [`castari-proxy/claude-agent-demo/app/api/portkey/v1/messages/route.ts`](castari-proxy/claude-agent-demo/app/api/portkey/v1/messages/route.ts)
+
+### What happens in Mode 2
+
+When the selected model starts with `pk:`:
+
+1. The app points the SDK to the local Portkey route instead of the Cloudflare worker.
+2. `queryCastari` treats the request as a Portkey request.
+3. The `pk:` prefix is stripped so the wire model becomes the provider-native model name.
+4. The request is forwarded to the local `/api/portkey/v1/messages` route.
+5. That local route chooses the correct Portkey virtual key based on the provider in the model name.
+6. The local route forwards Anthropic protocol headers plus:
+   - `x-portkey-api-key`
+   - `x-portkey-virtual-key`
+7. Portkey handles the provider-specific translation.
+8. The response is normalized back into the format the SDK expects.
+
+### What happens in Mode 1
+
+When the selected model is not `pk:`:
+
+1. The SDK points to the configured Cloudflare worker or local Ollama route.
+2. `queryCastari` injects routing headers such as:
+   - `x-castari-provider`
+   - `x-castari-model`
+   - `x-castari-wire-model`
+3. The worker decides where the request goes.
+4. The worker performs the response translation.
+
+---
+
+## Why A Proxy Is Necessary At All
+
+The Claude Agent SDK wants to speak the Anthropic Messages API.
+
+If the target provider is not Anthropic, something has to bridge the gap.
+
+That bridge has to do more than rename the model.
+
+It must also preserve:
+
+- streaming semantics
+- tool call structures
+- stop reasons
+- message content blocks
+- tool result shapes
+- compatible request and response envelopes
+
+Without that translation layer, the SDK can start, but the agent loop breaks the moment it expects Anthropic-specific behavior from a non-Anthropic provider.
+
+Mode 1 proves this explicitly with our own worker.
+
+Mode 2 proves that a managed proxy can do the same job well enough for the app to work as an agent, not just as a text completion client.
+
+---
+
+## What The Application Actually Does
+
+The user experience is intentionally simple.
+
+The user enters a plain-English request, for example:
+
+```text
+Generate a successful login test case and an invalid password test case for a web application.
 ```
+
+The agent then:
+
+1. interprets the request
+2. decides whether it needs tools
+3. writes XML files into a controlled workspace
+4. streams its progress back to the UI
+5. shows the generated files in the right panel
+
+The important thing is that the app is not just prompting a model for freeform text.
+
+It is running a tool-using agent with:
+
+- a system prompt
+- a restricted tool policy
+- file generation
+- multi-turn session behavior
+- live streamed events
+
+That makes it a better proof of proxy compatibility than a basic “hello world” completion demo.
+
+---
+
+## What The UI Shows
+
+The main UI has three responsibilities:
+
+### Left panel
+
+- choose proxy mode
+- choose model
+- choose app type
+- optionally enable extended thinking on supported Claude models
+- inspect cost and token usage
+
+### Center panel
+
+- send prompts
+- watch streamed tool calls
+- watch partial responses as they arrive
+- continue the session across turns
+
+### Right panel
+
+- inspect generated XML files
+- verify that file writing actually occurred
+- confirm the agent produced structured artifacts, not just plain text
+
+---
+
+## Why XML Test Case Generation Is The Right Demo
+
+This use case is a good proxy test for an agent system because it requires more than simple text output.
+
+It exercises:
+
+- structured output
+- file writing
+- tool use
+- streaming
+- session state
+- prompt discipline
+
+If the proxy layer only supported “chat completion”, that would not be enough.
+
+This application is more convincing because it requires the model to behave like an agent, not just like a chatbot.
+
+---
+
+## Repository Structure
+
+```text
 POC-001/
-├── castari-proxy/
-│   ├── claude-agent-demo/          ← Main application (Next.js + TypeScript)
-│   │   ├── app/
-│   │   │   ├── api/
-│   │   │   │   ├── generate/       ← Streaming test-case generation endpoint
-│   │   │   │   ├── workspace/      ← List & clear generated XML files
-│   │   │   │   └── ollama/         ← Local Ollama proxy route
-│   │   │   ├── components/
-│   │   │   │   └── AttoChat.tsx    ← Main UI (3-panel layout + mode toggle)
-│   │   │   └── globals.css
-│   │   └── lib/
-│   │       ├── agent/
-│   │       │   ├── atto-session.ts ← Session builder: prompt, tools, env, base URL
-│   │       │   └── atto-config.ts  ← Model lists (Cloudflare + Portkey), app-type options
-│   │       ├── policy/
-│   │       │   └── permission.ts   ← Tool allow-list, Write path jail
-│   │       ├── env.ts              ← Zod-validated env schema
-│   │       └── castariProxy.ts     ← Re-exports queryCastari from the package
-│   │
-│   ├── src/                        ← queryCastari package source
-│   │   └── queryCastari.ts         ← Fetch interceptor + provider/model routing logic
-│   │
-│   └── worker/                     ← Cloudflare Worker (Mode 1 proxy)
-│       ├── src/
-│       │   ├── index.ts            ← Entry: reads headers, routes to provider
-│       │   ├── translator.ts       ← Anthropic ↔ OpenAI format conversion
-│       │   ├── stream.ts           ← SSE streaming conversion
-│       │   ├── provider.ts         ← Provider detection, server-tool handling
-│       │   └── config.ts           ← Worker environment config
-│       └── wrangler.toml           ← Cloudflare deployment config
-│
-└── atto-poc/                       ← Original Python POC (kept for reference)
-    ├── main.py                     ← FastAPI server
-    ├── app/orchestrator.py         ← Agentic loop using LiteLLM
-    └── ui.py                       ← Streamlit demo UI
+├── README.md                                <- canonical project README
+├── atto-poc/                                <- original Python proof of concept
+└── castari-proxy/
+    ├── src/                                 <- queryCastari package source
+    │   └── queryCastari.ts                  <- fetch interception and routing
+    ├── worker/                              <- Cloudflare Worker for Mode 1
+    │   └── src/
+    │       ├── index.ts                     <- request routing
+    │       ├── provider.ts                  <- provider resolution
+    │       ├── translator.ts                <- format translation
+    │       └── stream.ts                    <- streaming translation
+    └── claude-agent-demo/                   <- main Next.js application
+        ├── app/
+        │   ├── api/
+        │   │   ├── generate/route.ts        <- starts agent run, streams events
+        │   │   ├── workspace/route.ts       <- lists and clears generated files
+        │   │   ├── portkey/v1/messages/     <- local Portkey adapter route
+        │   │   └── ollama/v1/messages/      <- local Ollama adapter route
+        │   └── components/
+        │       └── AttoChat.tsx             <- main application UI
+        └── lib/
+            ├── agent/
+            │   ├── atto-session.ts          <- session setup and model routing
+            │   ├── atto-config.ts           <- UI model lists
+            │   └── events.ts                <- SDK event to UI event mapping
+            ├── policy/
+            │   └── permission.ts            <- tool restrictions and path jail
+            ├── env.ts                       <- validated environment contract
+            └── castariProxy.ts              <- re-export of queryCastari
 ```
 
 ---
 
-## Prerequisites
+## Mode 2 Credential Behavior
 
-- **Node.js 18+**
-- **Anthropic API key** — [console.anthropic.com](https://console.anthropic.com) *(always required — the Agent SDK runs on Claude)*
+This is the most important operational section.
 
-**For Mode 1 (Cloudflare):**
-- **Cloudflare account** — [cloudflare.com](https://cloudflare.com) *(free tier is enough)*
-- **OpenRouter API key** — [openrouter.ai/keys](https://openrouter.ai/keys) *(for Gemini, GPT-4o, Llama, Mistral via OpenRouter)*
-- **Google Gemini API key** *(optional — for direct Gemini routing, bypassing OpenRouter)*
-- **OpenAI API key** *(optional — for direct OpenAI routing)*
+### Required for Mode 2
 
-**For Mode 2 (Portkey):**
-- **Portkey API key** — [app.portkey.ai](https://app.portkey.ai) → API Keys
-- **Provider API keys** — same Anthropic / OpenAI / Gemini keys you already have
+- `PORTKEY_API_KEY`
+- `PORTKEY_VK_ANTHROPIC`
+- `PORTKEY_VK_OPENAI`
+- `PORTKEY_VK_GOOGLE`
+- `ANTHROPIC_API_KEY` for the app's current startup contract
+
+### What Mode 2 actually uses for inference
+
+For `pk:*` models:
+
+- the request is routed through Portkey
+- the provider is selected from the model prefix
+- the virtual key is selected from the provider
+- the actual provider inference is expected to happen through Portkey
+
+### What Mode 2 does not rely on for provider switching
+
+The current Mode 2 path is no longer intended to forward:
+
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+
+for Portkey inference routing.
+
+That is important because it means Mode 2 is testing the Portkey virtual-key path rather than accidentally falling back to raw direct provider credentials for OpenAI or Gemini.
 
 ---
 
-## Setup
+## Mode 1 Credential Behavior
 
-### 1. Clone and install
+Mode 1 is broader and more explicit.
+
+It can use:
+
+- `ANTHROPIC_API_KEY` for direct Claude
+- `OPENROUTER_API_KEY` for `or:*`
+- `OPENAI_API_KEY` for `o:*`
+- `GEMINI_API_KEY` for `g:*`
+- local Ollama for `ollama:*`
+
+This is why Mode 1 is still valuable:
+
+- it shows the translation logic in a self-hosted form
+- it allows deeper inspection and control
+- it supports more experimental routing choices
+
+But it is not the main point of this POC anymore. Mode 2 is.
+
+---
+
+## Current Model Options
+
+### Mode 2 — Portkey-first
+
+Current UI options include:
+
+- `pk:anthropic/claude-sonnet-4-6`
+- `pk:anthropic/claude-haiku-4-5-20251001`
+- `pk:anthropic/claude-opus-4-5`
+- `pk:openai/gpt-4.1`
+- `pk:openai/gpt-4.1-mini`
+- `pk:openai/gpt-4o`
+- `pk:openai/gpt-4o-mini`
+- `pk:openai/o4-mini`
+- `pk:openai/o3-mini`
+- `pk:google/gemini-2.5-flash`
+- `pk:google/gemini-2.5-pro`
+
+These are configured in:
+
+- [`castari-proxy/claude-agent-demo/lib/agent/atto-config.ts`](castari-proxy/claude-agent-demo/lib/agent/atto-config.ts)
+
+### Mode 1 — optional alternative
+
+Current UI options include:
+
+- direct Claude models
+- OpenRouter models
+- direct OpenAI models
+- direct Gemini models
+- local Ollama models
+
+---
+
+## Guardrails And Safety
+
+This is still an agent, so the file-writing behavior matters.
+
+The application limits the tool surface and constrains where files can be written.
+
+Key protections:
+
+- `Read`, `Write`, `Glob`, and `Grep` are the primary Atto tools
+- file writes are jailed into `.data/workspace/`
+- the system prompt reinforces the same constraint
+- the server-side policy enforces it regardless of model behavior
+
+This matters because the proxy experiment would be much less credible if the app only demonstrated raw text responses and never touched real tools.
+
+---
+
+## Recommended Local Setup
+
+If your goal is to evaluate the main architectural claim, start with Mode 2 first.
+
+### Prerequisites
+
+- Node.js 18+
+- npm
+- a Portkey account
+- three Portkey virtual keys:
+  - Anthropic
+  - OpenAI
+  - Google
+
+### Environment
+
+Create `castari-proxy/claude-agent-demo/.env.local`:
+
+```env
+# Current app startup contract
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional unless you want Mode 1
+CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AIza...
+
+# Mode 2
+PORTKEY_API_KEY=pk-...
+PORTKEY_VK_ANTHROPIC=vk-...
+PORTKEY_VK_OPENAI=vk-...
+PORTKEY_VK_GOOGLE=vk-...
+```
+
+### Install and run
 
 ```bash
 git clone https://github.com/Bharath-Testsigma/POC-001.git
 cd POC-001/castari-proxy/claude-agent-demo
 npm install
-```
-
-### 2. Configure environment
-
-Create `.env.local` in `castari-proxy/claude-agent-demo/`:
-
-```env
-# Always required
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Mode 1 — Cloudflare Worker URL (deploy steps below)
-CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
-
-# Mode 1 — additional provider keys (optional, enables those model groups)
-OPENROUTER_API_KEY=sk-or-v1-...
-GEMINI_API_KEY=AIza...
-OPENAI_API_KEY=sk-...
-
-# Mode 2 — Portkey (enables the Portkey mode toggle in UI)
-PORTKEY_API_KEY=pk-...
-```
-
-### 3. Deploy your Cloudflare Worker (Mode 1 only)
-
-The Cloudflare Worker is the translation proxy for Mode 1. You deploy it to your own Cloudflare account — no third-party service.
-
-```bash
-cd ../worker
-npm install
-npx wrangler login          # opens browser — sign in to Cloudflare
-```
-
-Edit `wrangler.toml` and replace the `account_id` with yours (find it in Cloudflare dashboard → Workers & Pages, right sidebar):
-
-```toml
-name = "atto-proxy"
-account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
-```
-
-Deploy:
-
-```bash
-npx wrangler deploy
-# Deployed: https://atto-proxy.YOUR-SUBDOMAIN.workers.dev  ← paste into CASTARI_WORKER_URL
-```
-
-### 4. Start the app
-
-```bash
-cd ../claude-agent-demo
 npm run dev
 ```
 
-Open **http://localhost:3000**
+Open:
 
-> **Note:** `npm run dev` automatically runs `scripts/sync-castari-proxy.mjs` first, which copies the `queryCastari` source from `castari-proxy/src/` into `node_modules/castari-proxy`. This keeps the local package in sync without a publish step.
-
----
-
-## Using the App
-
-### Proxy mode toggle
-
-The sidebar shows two buttons at the top:
-
-- **☁ Cloudflare** — routes through your self-hosted Cloudflare Worker. Shows all available models: Claude, OpenRouter (Gemini, GPT-4o, Llama, Mistral), direct Google/OpenAI, and local Ollama.
-- **🔑 Portkey** — routes through Portkey's managed gateway. Shows Claude, GPT-4o family, and Gemini via Portkey. Requires `PORTKEY_API_KEY` in `.env.local`.
-
-Switching modes automatically resets the model to the first available in that list.
-
-### The three-panel layout
-
-**Left — Controls**
-- Proxy mode toggle (Cloudflare / Portkey)
-- Model selector (grouped by provider)
-- Model capability badges: tool use reliability, thinking support
-- App type selector (Web / Mobile / API / Desktop)
-- Extended thinking toggle + budget slider (Claude models only)
-- Token usage + cost after each run
-
-**Centre — Conversation**
-- Type your request, press Enter to send
-- Watch the agent work in real time: file reads, file writes, and reasoning appear as they happen
-- Thinking blocks show the model's step-by-step reasoning before it acts
-- Session is maintained across turns — you can edit previously generated files
-
-**Right — Generated Test Cases**
-- Every XML file the agent writes appears here live
-- Click any file to view it
-- Copy button on each file
-
-### Example prompts
-
-```
-Generate login test cases — happy path and invalid credentials
-Generate an e-commerce checkout flow with 3 steps
-Generate password reset flow test cases with edge cases
-Edit the login test to add a "remember me" checkbox step
+```text
+http://localhost:3000
 ```
 
----
+Then:
 
-## Available Models
-
-### Mode 1 — Cloudflare
-
-| Model value | Label | Provider | Tool use |
-|---|---|---|---|
-| `claude-sonnet-4-6` | Claude Sonnet 4.6 | Anthropic (direct) | Full |
-| `claude-haiku-4-5-20251001` | Claude Haiku 4.5 | Anthropic (direct) | Full |
-| `g:gemini-2.5-flash` | Gemini 2.5 Flash | Google (direct) | Full |
-| `g:gemini-2.5-pro` | Gemini 2.5 Pro | Google (direct) | Full |
-| `o:gpt-4.1` | GPT-4.1 | OpenAI (direct) | Full |
-| `o:gpt-4.1-mini` | GPT-4.1 Mini | OpenAI (direct) | Full |
-| `o:gpt-4o` | GPT-4o | OpenAI (direct) | Full |
-| `o:gpt-4o-mini` | GPT-4o Mini | OpenAI (direct) | Full |
-| `or:meta-llama/llama-3.3-70b-instruct` | Llama 3.3 70B | Meta via OpenRouter | Full |
-| `or:openai/gpt-oss-20b:free` | GPT-OSS 20B | OpenAI via OpenRouter (free) | Limited |
-| `ollama:llama3.1:8b` | Llama 3.1 8B | Local Ollama | Limited |
-
-### Mode 2 — Portkey
-
-| Model value | Label | Provider | Tool use |
-|---|---|---|---|
-| `pk:anthropic/claude-sonnet-4-6` | Claude Sonnet 4.6 | Anthropic via Portkey | Full |
-| `pk:anthropic/claude-haiku-4-5-20251001` | Claude Haiku 4.5 | Anthropic via Portkey | Full |
-| `pk:openai/gpt-4o` | GPT-4o | OpenAI via Portkey | Full |
-| `pk:openai/gpt-4o-mini` | GPT-4o Mini | OpenAI via Portkey | Full |
-| `pk:openai/gpt-4.1` | GPT-4.1 | OpenAI via Portkey | Full |
-| `pk:openai/gpt-4.1-mini` | GPT-4.1 Mini | OpenAI via Portkey | Full |
-| `pk:google/gemini-2.5-flash` | Gemini 2.5 Flash | Google via Portkey | Full |
-| `pk:google/gemini-2.5-pro` | Gemini 2.5 Pro | Google via Portkey | Full |
+1. switch to **Portkey**
+2. choose a `pk:*` model
+3. generate a test case
+4. compare behavior across Claude, OpenAI, and Gemini without changing application logic
 
 ---
 
-## Architecture Deep-Dive
+## When To Use Mode 1 Instead
 
-### Why a proxy at all?
+Use Mode 1 if you want:
 
-The Claude Agent SDK intercepts `globalThis.fetch` and redirects all `/v1/messages` calls to `ANTHROPIC_BASE_URL`. It cannot be directed per-call to a different provider natively — it only speaks Anthropic's API format.
+- full control over the translation layer
+- self-hosted routing
+- direct visibility into how Anthropic-format requests are being transformed
+- a reference implementation for your own proxy logic
 
-To support other providers, we need something that:
-1. Accepts Anthropic-format requests
-2. Translates them to the target provider's format
-3. Returns Anthropic-format responses
-
-That is exactly what both the Cloudflare Worker and Portkey do — they are an Anthropic-compatible facade over any model.
-
-### Mode 1 vs Mode 2 in detail
-
-**Mode 1 (Cloudflare Worker)** — self-hosted, full control:
-- You own and deploy the Worker — no data passes through third-party services
-- The translation logic (`translator.ts`, `stream.ts`) handles: message format, tool call schemas, tool result encoding, streaming SSE events, stop reason mapping, image content
-- Routing is header-based: `queryCastari` injects `x-castari-provider` and `x-castari-wire-model` on every request
-- Supports server-tool enforcement (forces Anthropic routing when server-side tools are used), MCP bridge mode, reasoning injection via `metadata.castari`
-
-**Mode 2 (Portkey)** — managed gateway, simpler:
-- Portkey's endpoint (`api.portkey.ai/v1`) is Anthropic-compatible — the SDK sees no difference
-- Routing is header-based: `queryCastari` injects `x-portkey-api-key`, `x-portkey-provider`, and `Authorization: Bearer <provider-key>`
-- Portkey handles all translation internally
-- Built-in dashboard: per-request cost, latency, model usage, error rates
-- Provider API keys are passed per-request — no pre-configuration needed in the Portkey dashboard
-
-### queryCastari.ts — the interceptor
-
-`castari-proxy/src/queryCastari.ts` is the single piece of code that makes the whole thing work. It:
-
-1. **Parses the model string** to detect provider and wire model:
-   - `claude-sonnet-4-6` → provider=`anthropic`, wireModel=`claude-sonnet-4-6`
-   - `or:meta-llama/llama-3.3-70b-instruct` → provider=`openrouter`, wireModel=`meta-llama/llama-3.3-70b-instruct`
-   - `pk:openai/gpt-4o` → provider=`portkey`, portkey_sub_provider=`openai`, wireModel=`gpt-4o`
-
-2. **Selects the correct base URL**:
-   - Cloudflare models → `CASTARI_WORKER_URL`
-   - Portkey models → `https://api.portkey.ai/v1`
-   - Ollama models → `http://localhost:3000/api/ollama`
-
-3. **Patches `globalThis.fetch`** (once per process) and intercepts all `POST /v1/messages` calls that match the registered base origin
-
-4. **Injects headers** depending on mode:
-   - Cloudflare: `x-castari-provider`, `x-castari-model`, `x-castari-wire-model`
-   - Portkey: `x-portkey-api-key`, `x-portkey-provider`, `Authorization: Bearer <key>`
-
-5. **Selects the right API key** for the target provider and sets it as `ANTHROPIC_API_KEY` in the subprocess env — the SDK uses this for the `x-api-key` header
-
-### The Write tool path jail
-
-The agent is given Read, Write, Glob, and Grep tools. Write is restricted by `lib/policy/permission.ts` — any path outside `.data/workspace/` is silently rewritten to be inside it. This prevents the model from writing anywhere on your filesystem regardless of what it decides.
+Mode 1 is not the main story of this README, but it is still a valid and important option.
 
 ---
 
-## Why This Matters for Testsigma
+## What This POC Proves Successfully
 
-The production Atto system (`alpha` + `atto-browser-agent-v2`) already routes through an internal gateway. This POC shows the same technique can work at the **Claude Agent SDK level**:
+This repository demonstrates that:
 
-- The SDK's tool-calling and decision-making can run on cheaper non-Claude models (Gemini Flash, GPT-4o-mini, Llama 70B) — reducing inference cost significantly
-- The code doesn't change — only the model string and proxy URL
-- Mode 2 (Portkey) demonstrates that a managed gateway can replace the self-hosted Cloudflare Worker if operational simplicity is preferred over full data control
+- a tool-using Claude Agent SDK application can be made multi-model through a proxy layer
+- a managed proxy can be sufficient for real agent behavior, not just basic completions
+- model switching can be pushed into routing and credential selection
+- the same app can compare Claude, OpenAI, and Gemini behavior under one agent UI
+
+The strongest conclusion is not “Portkey is good” or “Cloudflare is good”.
+
+The strongest conclusion is:
+
+> the agent runtime and the inference provider do not need to be coupled as tightly as they first appear.
+
+That is the real result this project is trying to demonstrate.
 
 ---
 
-## Security Notes
+## Limitations
 
-- API keys are injected per-request in the Node.js subprocess env — they are never stored in the proxy worker or Cloudflare
-- In Portkey mode, provider keys are passed via `Authorization` headers — Portkey forwards them to the provider and does not store them
-- The Write tool is path-jailed to `.data/workspace/` — verified server-side, not just in the system prompt
-- `Bash` and `KillBash` tools are blocked unconditionally
+This POC does not claim that:
+
+- every model is equally good at tool use
+- every provider will behave identically under translation
+- the Claude Agent SDK is truly provider-native
+- boot-time Anthropic requirements have been completely removed
+
+Instead, it shows that the architecture is practical enough to run a real agent workload with provider switching behind a proxy.
 
 ---
 
 ## Legacy Python POC
 
-`atto-poc/` contains the original Python implementation using FastAPI + LiteLLM + Streamlit. It's kept for reference to show the same multi-model idea in a simpler form. The TypeScript version here supersedes it by using the Claude Agent SDK for native tool streaming, session resumption, extended thinking, and MCP support.
+The `atto-poc/` folder contains the earlier Python prototype using FastAPI, Streamlit, and LiteLLM.
+
+It is kept for reference.
+
+The Next.js application in `castari-proxy/claude-agent-demo/` is the main implementation for this repository because it exercises the Claude Agent SDK directly, which is the more important part of the proof.

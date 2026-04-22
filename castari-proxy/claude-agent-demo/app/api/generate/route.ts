@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { mapMessageToUIEvents } from '@/lib/agent/events';
+import { isAllowedDemoModel } from '@/lib/agent/model-allowlist';
 import { startAttoQuery } from '@/lib/agent/atto-session';
+import { enforceInternalRouteAccess } from '@/lib/security/internal-routes';
 import type { UIEvent } from '@/lib/types/events';
 
 export const runtime = 'nodejs';
@@ -27,7 +29,7 @@ function humaniseAgentError(raw: string, model: string): string {
       return `The model failed to respond. Your OpenRouter account likely needs credits — add them at openrouter.ai/settings/credits. To use a free model, select "GPT-OSS 20B (free)" from the dropdown, or switch to a Claude model.`;
     }
     if (model.startsWith('pk:')) {
-      return `Portkey request failed. Check that PORTKEY_API_KEY is set and the provider API key (Anthropic/OpenAI/Gemini) is valid.`;
+      return `Portkey request failed. Check that PORTKEY_API_KEY is set and the matching provider virtual key (PORTKEY_VK_ANTHROPIC, PORTKEY_VK_OPENAI, or PORTKEY_VK_GOOGLE) is configured.`;
     }
     return `The agent process crashed (exit code 1). Check that your API key is valid and try again.`;
   }
@@ -35,6 +37,9 @@ function humaniseAgentError(raw: string, model: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const accessDenied = enforceInternalRouteAccess(req);
+  if (accessDenied) return accessDenied;
+
   let body: z.infer<typeof requestSchema>;
   try {
     const json = await req.json();
@@ -54,6 +59,13 @@ export async function POST(req: NextRequest) {
   }
 
   const { query, appType, model, sessionId, thinkingBudget } = body;
+
+  if (!isAllowedDemoModel(model)) {
+    return new Response(JSON.stringify({ error: `Model not allowed for demo route: ${model}` }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   const agentQuery = startAttoQuery(query, {
     model,

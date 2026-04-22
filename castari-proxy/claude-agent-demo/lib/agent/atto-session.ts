@@ -17,9 +17,9 @@ Write all test case files to: ${workspacePath}/
 Example: Write(file_path="${workspacePath}/login_success.xml", content="...")
 
 ## Tools Available
-- Read(file_path): Read an existing file
+- Read(file_path): Read an existing XML file from ${workspacePath}/ only
 - Write(file_path, content): Write a new file (always use ${workspacePath}/ prefix)
-- Glob(pattern, path): List files (use pattern "${workspacePath}/*.xml")
+- Glob(pattern, path): List files from ${workspacePath}/ only (use pattern "${workspacePath}/*.xml")
 
 ## Rules
 1. Generate ONE test case per XML file with a descriptive name (e.g. login_happy_path.xml)
@@ -27,6 +27,7 @@ Example: Write(file_path="${workspacePath}/login_success.xml", content="...")
 3. Every file MUST be valid XML in the format below
 4. For EDIT requests: Read the file first, then Write the updated version
 5. For QUESTION requests: Answer directly, write no files
+6. Never read, search, or inspect files outside "${workspacePath}/"
 
 ## XML Format (required)
 <?xml version="1.0" encoding="UTF-8"?>
@@ -82,6 +83,7 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
 
   const isOllama = config.model.startsWith('ollama:');
   const isPortkey = config.model.startsWith('pk:');
+  const portkeyApiKey = (env as Record<string, string | undefined>).PORTKEY_API_KEY;
   const baseUrl = isOllama
     ? `${process.env.NEXT_SERVER_URL ?? 'http://localhost:3000'}/api/ollama`
     : isPortkey
@@ -89,21 +91,21 @@ export function buildAttoOptions(config: AttoQueryConfig): CastariOptions {
     : env.CASTARI_WORKER_URL;
 
   const envOverrides: Record<string, string> = {
-    ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+    ANTHROPIC_API_KEY: isPortkey && portkeyApiKey ? portkeyApiKey : env.ANTHROPIC_API_KEY,
     ANTHROPIC_BASE_URL: baseUrl,
     CASTARI_GATEWAY_URL: baseUrl,
   };
 
   if (env.OPENROUTER_API_KEY) envOverrides.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
-  if ((env as Record<string, string | undefined>).GEMINI_API_KEY) {
+  if (!isPortkey && (env as Record<string, string | undefined>).GEMINI_API_KEY) {
     envOverrides.GEMINI_API_KEY = (env as Record<string, string | undefined>).GEMINI_API_KEY!;
   }
-  if ((env as Record<string, string | undefined>).OPENAI_API_KEY) {
+  if (!isPortkey && (env as Record<string, string | undefined>).OPENAI_API_KEY) {
     envOverrides.OPENAI_API_KEY = (env as Record<string, string | undefined>).OPENAI_API_KEY!;
   }
   if (env.CASTARI_WORKER_TOKEN) envOverrides.X_WORKER_TOKEN = env.CASTARI_WORKER_TOKEN;
-  if ((env as Record<string, string | undefined>).PORTKEY_API_KEY) {
-    envOverrides.PORTKEY_API_KEY = (env as Record<string, string | undefined>).PORTKEY_API_KEY!;
+  if (portkeyApiKey) {
+    envOverrides.PORTKEY_API_KEY = portkeyApiKey;
   }
 
   const options: Options = {

@@ -52,6 +52,8 @@ export function buildPolicy(mode: ToolMode): PolicyConfig {
         : [...SAFE_TOOLS];
 
   const writeRoot = mode === 'atto' ? ATTO_WORKSPACE : WRITE_ROOT;
+  const readRoot = mode === 'atto' ? ATTO_WORKSPACE : PROJECT_CWD;
+  const searchRoot = mode === 'atto' ? ATTO_WORKSPACE : PROJECT_CWD;
   const disallowedTools = [...ALWAYS_DENIED];
 
   const canUseTool: CanUseTool = async (toolName, input) => {
@@ -64,7 +66,11 @@ export function buildPolicy(mode: ToolMode): PolicyConfig {
     }
 
     try {
-      const updatedInput = rewriteInputs(toolName, input as ToolInput, writeRoot);
+      const updatedInput = rewriteInputs(toolName, input as ToolInput, {
+        readRoot,
+        searchRoot,
+        writeRoot,
+      });
       return { behavior: 'allow', updatedInput };
     } catch (error) {
       const message =
@@ -81,37 +87,43 @@ export function buildPolicy(mode: ToolMode): PolicyConfig {
   };
 }
 
-function rewriteInputs(toolName: string, input: ToolInput, writeRoot: string): Record<string, unknown> {
+interface PolicyRoots {
+  readRoot: string;
+  searchRoot: string;
+  writeRoot: string;
+}
+
+function rewriteInputs(toolName: string, input: ToolInput, roots: PolicyRoots): Record<string, unknown> {
   switch (toolName) {
     case 'Read':
-      return rewriteReadInput(input);
+      return rewriteReadInput(input, roots.readRoot);
     case 'Edit':
-      return rewriteEditInput(input);
+      return rewriteEditInput(input, roots.readRoot);
     case 'Write':
-      return rewriteWriteInput(input, writeRoot);
+      return rewriteWriteInput(input, roots.writeRoot);
     case 'Glob':
     case 'Grep':
-      return rewriteSearchInput(input);
+      return rewriteSearchInput(input, roots.searchRoot);
     default:
       return input as Record<string, unknown>;
   }
 }
 
-function rewriteReadInput(input: ToolInput): Record<string, unknown> {
+function rewriteReadInput(input: ToolInput, readRoot: string): Record<string, unknown> {
   const fileInput = input as { file_path: string };
   if (!fileInput.file_path) throw new Error('file_path is required');
   return {
     ...fileInput,
-    file_path: ensureInside(PROJECT_CWD, fileInput.file_path)
+    file_path: ensureInside(readRoot, fileInput.file_path)
   };
 }
 
-function rewriteEditInput(input: ToolInput): Record<string, unknown> {
+function rewriteEditInput(input: ToolInput, readRoot: string): Record<string, unknown> {
   const fileInput = input as { file_path: string };
   if (!fileInput.file_path) throw new Error('file_path is required');
   return {
     ...fileInput,
-    file_path: ensureInside(PROJECT_CWD, fileInput.file_path)
+    file_path: ensureInside(readRoot, fileInput.file_path)
   };
 }
 
@@ -126,14 +138,10 @@ function rewriteWriteInput(input: ToolInput, writeRoot: string): Record<string, 
   };
 }
 
-function rewriteSearchInput(input: ToolInput): Record<string, unknown> {
+function rewriteSearchInput(input: ToolInput, searchRoot: string): Record<string, unknown> {
   const searchInput = input as { path?: string };
-  if (!searchInput.path) {
-    return input as Record<string, unknown>;
-  }
-
   return {
     ...searchInput,
-    path: ensureInside(PROJECT_CWD, searchInput.path)
+    path: ensureInside(searchRoot, searchInput.path ?? '.')
   } as Record<string, unknown>;
 }

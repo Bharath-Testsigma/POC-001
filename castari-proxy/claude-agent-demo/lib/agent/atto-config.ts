@@ -29,12 +29,9 @@ export const PORTKEY_MODEL_OPTIONS: AttoModelOption[] = [
   { value: 'pk:openai/o4-mini', label: 'o4-mini (reasoning)', provider: 'OpenAI', toolUse: 'full', thinking: false },
   { value: 'pk:openai/o3-mini', label: 'o3-mini (reasoning)', provider: 'OpenAI', toolUse: 'limited', thinking: false },
 
-  // Google via Portkey
+  // Google via Portkey (Vertex AI — only models available on the configured project)
   { value: 'pk:google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'Google', toolUse: 'full', thinking: false },
   { value: 'pk:google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google', toolUse: 'full', thinking: false },
-  { value: 'pk:google/gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'Google', toolUse: 'full', thinking: false },
-  { value: 'pk:google/gemini-1.5-pro', label: 'Gemini 1.5 Pro', provider: 'Google', toolUse: 'full', thinking: false },
-  { value: 'pk:google/gemini-1.5-flash', label: 'Gemini 1.5 Flash', provider: 'Google', toolUse: 'full', thinking: false },
 ];
 
 export const ATTO_MODEL_OPTIONS: AttoModelOption[] = [
