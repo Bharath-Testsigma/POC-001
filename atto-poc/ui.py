@@ -3,7 +3,6 @@ Atto POC — Streamlit Demo UI
 Run with: uv run streamlit run ui.py
 """
 
-import json
 import time
 import httpx
 import streamlit as st
@@ -11,68 +10,131 @@ import streamlit as st
 API_BASE = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
-# Model catalogue: name, provider, input $/1M tokens, output $/1M tokens
+# Model catalogue grouped by provider
 # ---------------------------------------------------------------------------
-MODELS = {
-    "Claude Haiku 4.5  (default)": {
-        "id": "openai/claude-haiku",
-        "input_cost": 0.80,
-        "output_cost": 4.00,
-        "badge": "🟡 Fast",
+PROVIDERS = {
+    "Anthropic": {
+        "color": "#d97706",
+        "models": {
+            "Claude Haiku 4.5": {
+                "id": "openai/claude-haiku",
+                "input_cost": 0.80,
+                "output_cost": 4.00,
+                "note": "Fast & cheap · Best for demos",
+                "default": True,
+            },
+            "Claude Sonnet 4.6": {
+                "id": "openai/claude-sonnet",
+                "input_cost": 3.00,
+                "output_cost": 15.00,
+                "note": "Most capable Claude",
+                "default": False,
+            },
+        },
     },
-    "Claude Sonnet 4.6": {
-        "id": "openai/claude-sonnet",
-        "input_cost": 3.00,
-        "output_cost": 15.00,
-        "badge": "🔴 Powerful",
+    "Google": {
+        "color": "#2563eb",
+        "models": {
+            "Gemini 2.0 Flash": {
+                "id": "openai/gemini-flash",
+                "input_cost": 0.10,
+                "output_cost": 0.40,
+                "note": "Cheapest · Great quality",
+                "default": False,
+            },
+            "Gemini 2.0 Flash Lite": {
+                "id": "openai/gemini-flash-lite",
+                "input_cost": 0.075,
+                "output_cost": 0.30,
+                "note": "Ultra cheap",
+                "default": False,
+            },
+            "Gemini 2.5 Flash": {
+                "id": "openai/gemini-2.5-flash",
+                "input_cost": 0.15,
+                "output_cost": 0.60,
+                "note": "Balanced speed & quality",
+                "default": False,
+            },
+            "Gemini 2.5 Pro": {
+                "id": "openai/gemini-pro",
+                "input_cost": 1.25,
+                "output_cost": 10.00,
+                "note": "Most capable Gemini",
+                "default": False,
+            },
+        },
     },
-    "Gemini 2.0 Flash": {
-        "id": "openai/gemini-flash",
-        "input_cost": 0.10,
-        "output_cost": 0.40,
-        "badge": "🟢 Cheapest",
-    },
-    "Gemini 2.0 Flash Lite": {
-        "id": "openai/gemini-flash-lite",
-        "input_cost": 0.075,
-        "output_cost": 0.30,
-        "badge": "🟢 Ultra Cheap",
-    },
-    "Gemini 2.5 Flash": {
-        "id": "openai/gemini-2.5-flash",
-        "input_cost": 0.15,
-        "output_cost": 0.60,
-        "badge": "🔵 Balanced",
-    },
-    "Gemini 2.5 Pro": {
-        "id": "openai/gemini-pro",
-        "input_cost": 1.25,
-        "output_cost": 10.00,
-        "badge": "🔴 Powerful",
-    },
-    "GPT-4o Mini": {
-        "id": "openai/gpt-4o-mini",
-        "input_cost": 0.15,
-        "output_cost": 0.60,
-        "badge": "🟢 Cheap",
-    },
-    "GPT-4o": {
-        "id": "openai/gpt-4o",
-        "input_cost": 5.00,
-        "output_cost": 15.00,
-        "badge": "🔴 Premium",
+    "OpenAI": {
+        "color": "#16a34a",
+        "models": {
+            "GPT-4o Mini": {
+                "id": "openai/gpt-4o-mini",
+                "input_cost": 0.15,
+                "output_cost": 0.60,
+                "note": "Fast & affordable GPT",
+                "default": False,
+            },
+            "GPT-4o": {
+                "id": "openai/gpt-4o",
+                "input_cost": 5.00,
+                "output_cost": 15.00,
+                "note": "OpenAI flagship",
+                "default": False,
+            },
+        },
     },
 }
 
-WORKFLOW_COLORS = {
-    "GENERATION": "#2ecc71",
-    "EDIT": "#3498db",
-    "QUESTION": "#e67e22",
+FLAT_MODELS = {
+    name: info
+    for provider in PROVIDERS.values()
+    for name, info in provider["models"].items()
 }
 
+EXAMPLE_PROMPTS = [
+    {
+        "title": "Login test (web)",
+        "icon": "🔐",
+        "prompt": "Generate a login test case for Gmail including happy path and invalid password scenario",
+        "app_type": "web",
+    },
+    {
+        "title": "REST API test",
+        "icon": "🌐",
+        "prompt": "Generate a test case for a POST /login REST API endpoint that returns a JWT token on success",
+        "app_type": "api",
+    },
+    {
+        "title": "Mobile checkout",
+        "icon": "📱",
+        "prompt": "Generate a checkout test case for a mobile e-commerce app covering add to cart, payment, and order confirmation",
+        "app_type": "mobile",
+    },
+    {
+        "title": "Edit existing test",
+        "icon": "✏️",
+        "prompt": "Add a logout step to any existing test case in the workspace",
+        "app_type": "web",
+    },
+    {
+        "title": "Forgot password",
+        "icon": "🔑",
+        "prompt": "Generate a forgot password flow test case for a web app",
+        "app_type": "web",
+    },
+    {
+        "title": "Search & filter",
+        "icon": "🔍",
+        "prompt": "Generate a test case for a product search with filters on an e-commerce web app",
+        "app_type": "web",
+    },
+]
+
+WORKFLOW_COLORS = {"GENERATION": "#22c55e", "EDIT": "#3b82f6", "QUESTION": "#f59e0b"}
 
 # ---------------------------------------------------------------------------
-# Page config
+# Page setup
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="Atto POC — AI Test Generator",
@@ -83,131 +145,228 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .metric-card {
-        background: #1e1e2e;
-        border-radius: 8px;
-        padding: 16px;
-        text-align: center;
-    }
-    .xml-block {
-        background: #0d1117;
-        border-radius: 6px;
-        font-family: monospace;
-        font-size: 13px;
-        padding: 12px;
-        overflow-x: auto;
-        white-space: pre;
-    }
-    .badge {
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+
+    .provider-pill {
         display: inline-block;
-        padding: 2px 8px;
+        padding: 2px 10px;
         border-radius: 99px;
-        font-size: 12px;
-        font-weight: 600;
-        margin-left: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-bottom: 6px;
     }
-    .tool-row {
-        border-left: 3px solid #3498db;
-        padding-left: 10px;
+    .section-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: #64748b;
         margin-bottom: 8px;
-        font-family: monospace;
-        font-size: 13px;
     }
+    .arch-box {
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        padding: 14px;
+        font-family: monospace;
+        font-size: 12px;
+        color: #94a3b8;
+        line-height: 2;
+    }
+    .cost-row { font-size: 13px; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
-# Sidebar
+# Service health check (cached 10s)
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=10)
+def check_services():
+    results = {}
+    try:
+        httpx.get(f"{API_BASE}/workspace", timeout=2)
+        results["api"] = True
+    except Exception:
+        results["api"] = False
+    try:
+        httpx.get("http://localhost:4000/health/liveliness", timeout=2)
+        results["proxy"] = True
+    except Exception:
+        results["proxy"] = False
+    return results
+
+
+# ---------------------------------------------------------------------------
+# SIDEBAR
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.title("⚙️ Configuration")
+    st.markdown("## ⚙️ Configuration")
 
-    selected_model_name = st.selectbox(
-        "Model",
-        list(MODELS.keys()),
-        help="All models route through the local LiteLLM proxy. Switch freely.",
+    # Service status
+    services = check_services()
+    proxy_ok = services.get("proxy", False)
+    api_ok = services.get("api", False)
+
+    col_a, col_b = st.columns(2)
+    col_a.markdown(
+        f"{'🟢' if proxy_ok else '🔴'} **LiteLLM**<br><small>:4000</small>",
+        unsafe_allow_html=True,
     )
-    model_info = MODELS[selected_model_name]
-    st.caption(f"{model_info['badge']}  |  Input: **${model_info['input_cost']}/1M**  |  Output: **${model_info['output_cost']}/1M**")
-
-    app_type = st.selectbox("App Type", ["web", "mobile", "api"])
-
-    st.divider()
-    st.subheader("💰 Cost Comparison")
-    st.caption("Approximate cost per ~1000 tokens (typical test case generation)")
-
-    cost_rows = []
-    for name, info in MODELS.items():
-        approx = (info["input_cost"] * 0.5 + info["output_cost"] * 0.5) / 1000
-        cost_rows.append({"Model": name.split("(")[0].strip(), "$/call est.": f"${approx:.4f}", "Badge": info["badge"]})
-
-    for row in cost_rows:
-        is_selected = row["Model"].strip() in selected_model_name
-        prefix = "▶ " if is_selected else "  "
-        st.markdown(f"`{prefix}{row['Model']}` — {row['$/call est.']} {row['Badge']}")
+    col_b.markdown(
+        f"{'🟢' if api_ok else '🔴'} **FastAPI**<br><small>:8000</small>",
+        unsafe_allow_html=True,
+    )
+    if not proxy_ok:
+        st.error("`docker compose up -d`", icon="🚨")
+    if not api_ok:
+        st.error("`uv run python main.py`", icon="🚨")
 
     st.divider()
-    st.subheader("🗂️ Workspace")
-    if st.button("🗑️ Clear workspace", use_container_width=True):
+
+    # Model picker
+    st.markdown("### 🤖 Model")
+    selected_model_name = None
+    for provider_name, provider_data in PROVIDERS.items():
+        st.markdown(
+            f"<span class='provider-pill' style='background:{provider_data['color']}22;"
+            f"color:{provider_data['color']};border:1px solid {provider_data['color']}55'>"
+            f"{provider_name}</span>",
+            unsafe_allow_html=True,
+        )
+        for model_name, mdata in provider_data["models"].items():
+            checked = mdata["default"] and selected_model_name is None
+            if st.checkbox(f"{model_name}", value=checked, key=f"model_{model_name}",
+                           help=mdata["note"]):
+                selected_model_name = model_name
+
+    if selected_model_name is None:
+        selected_model_name = "Claude Haiku 4.5"
+
+    model_info = FLAT_MODELS[selected_model_name]
+    st.caption(
+        f"Input `${model_info['input_cost']}/1M` · Output `${model_info['output_cost']}/1M`  \n"
+        f"_{model_info['note']}_"
+    )
+
+    st.divider()
+
+    # App type
+    st.markdown("### 📱 App Type")
+    app_type = st.radio("", ["web", "mobile", "api"], horizontal=True,
+                        label_visibility="collapsed")
+
+    st.divider()
+
+    # Workspace
+    st.markdown("### 🗂️ Workspace")
+    if st.button("🗑️ Clear all files", use_container_width=True):
         try:
             httpx.delete(f"{API_BASE}/workspace")
-            st.success("Workspace cleared.")
+            st.success("Cleared.")
             st.rerun()
         except Exception as e:
-            st.error(f"API not reachable: {e}")
+            st.error(str(e))
 
     try:
         r = httpx.get(f"{API_BASE}/workspace", timeout=3)
         files = r.json().get("files", [])
         if files:
             for f in files:
-                st.markdown(f"📄 `{f['file_name']}` ({f['size_bytes']}B)")
+                st.markdown(f"📄 `{f['file_name']}` · {f['size_bytes']}B")
         else:
             st.caption("No files yet.")
     except Exception:
         st.caption("_(API offline)_")
 
+    st.divider()
+
+    # Architecture
+    st.markdown("### 🏗️ Flow")
+    st.markdown("""
+<div class='arch-box'>
+UI → FastAPI :8000<br>
+&nbsp;&nbsp;&nbsp;→ LiteLLM :4000<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Anthropic / Google / OpenAI
+</div>
+""", unsafe_allow_html=True)
+    st.caption("One orchestration loop, any model.")
+
 
 # ---------------------------------------------------------------------------
-# Main panel
+# MAIN PANEL — Header
 # ---------------------------------------------------------------------------
-st.title("🤖 Atto POC — AI Test Case Generator")
-st.caption(
-    "Replicates Testsigma's Atto system using **LiteLLM Proxy** (self-hosted). "
-    "Swap any model without changing a line of orchestration code."
+st.markdown("# 🤖 Atto — AI Test Case Generator POC")
+st.markdown(
+    "Type a natural-language request → agent reads the workspace, writes structured "
+    "**XML test cases**, validates them, and returns results. "
+    "Switch models freely — the orchestration code never changes."
 )
 
-# Sample prompts
-st.markdown("**Try a prompt:**")
-col1, col2, col3 = st.columns(3)
-prefill = ""
-if col1.button("Gmail Login test"):
-    prefill = "Generate a login test case for Gmail including happy path and invalid password scenario"
-if col2.button("API endpoint test"):
-    prefill = "Generate a test case for a POST /login REST API endpoint that returns a JWT token"
-if col3.button("Edit existing"):
-    prefill = "Add a logout step to any existing test case in the workspace"
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Example prompt cards
+# ---------------------------------------------------------------------------
+st.markdown("<div class='section-label'>Quick start — pick a scenario</div>",
+            unsafe_allow_html=True)
+
+if "prefill_prompt" not in st.session_state:
+    st.session_state.prefill_prompt = ""
+if "prefill_app_type" not in st.session_state:
+    st.session_state.prefill_app_type = "web"
+
+cols = st.columns(3)
+for i, ex in enumerate(EXAMPLE_PROMPTS):
+    with cols[i % 3]:
+        label = f"{ex['icon']} **{ex['title']}**\n\n{ex['prompt'][:65]}…"
+        if st.button(label, use_container_width=True, key=f"ex_{i}"):
+            st.session_state.prefill_prompt = ex["prompt"]
+            st.session_state.prefill_app_type = ex["app_type"]
+            st.rerun()
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Input form
+# ---------------------------------------------------------------------------
+st.markdown("<div class='section-label'>Your request</div>", unsafe_allow_html=True)
 
 query = st.text_area(
-    "Your request",
-    value=prefill,
-    height=90,
-    placeholder="e.g. Generate a login test case for Gmail...",
+    "request",
+    value=st.session_state.prefill_prompt,
+    height=110,
+    placeholder="e.g. Generate a login test case for Gmail with happy path and invalid password…",
+    label_visibility="collapsed",
 )
 
-existing_files_input = st.text_input(
-    "Existing files (comma-separated, to protect from deletion)",
-    placeholder="e.g. gmail_login.xml, checkout.xml",
-)
+c1, c2 = st.columns([3, 1])
+with c1:
+    existing_files_input = st.text_input(
+        "Protect files (comma-separated)",
+        placeholder="e.g. gmail_login.xml",
+        help="Files listed here cannot be deleted by the agent during this run.",
+    )
+with c2:
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    run_btn = st.button(
+        "▶ Generate",
+        type="primary",
+        use_container_width=True,
+        disabled=(not api_ok or not proxy_ok),
+    )
+
 existing_files = [f.strip() for f in existing_files_input.split(",") if f.strip()]
 
-run_btn = st.button("▶ Generate", type="primary", use_container_width=True)
-
 # ---------------------------------------------------------------------------
-# Run generation
+# Run
 # ---------------------------------------------------------------------------
 if run_btn and query.strip():
+    st.session_state.prefill_prompt = ""
+
     payload = {
         "query": query.strip(),
         "app_type": app_type,
@@ -215,99 +374,117 @@ if run_btn and query.strip():
         "model": model_info["id"],
     }
 
-    st.info(f"Sending to API with model: `{model_info['id']}`", icon="ℹ️")
-
-    with st.spinner("Running agentic loop…"):
-        t0 = time.time()
-        try:
-            response = httpx.post(
-                f"{API_BASE}/generate",
-                json=payload,
-                timeout=120,
-            )
-            elapsed = time.time() - t0
-            response.raise_for_status()
-            data = response.json()
-        except httpx.ConnectError:
-            st.error("Cannot reach API at localhost:8000. Is `uv run main.py` running?")
-            st.stop()
-        except Exception as e:
-            st.error(f"Request failed: {e}")
-            st.stop()
-
-    # ------------------------------------------------------------------
-    # Results header
-    # ------------------------------------------------------------------
-    wf = data.get("workflow_type", "GENERATION")
-    color = WORKFLOW_COLORS.get(wf, "#888")
+    st.divider()
     st.markdown(
-        f"<h3>Result — <span style='color:{color}'>{wf}</span></h3>",
+        f"<div class='section-label'>Running with {selected_model_name}</div>",
         unsafe_allow_html=True,
     )
 
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Workflow", wf)
-    m2.metric("Model", data.get("model_used", "—").split("/")[-1])
-    m3.metric("Tool calls", data.get("tool_calls_made", 0))
-    m4.metric("Retries", data.get("retries", 0))
-    m5.metric("Elapsed", f"{elapsed:.1f}s")
+    with st.spinner("Agent working — may take 20–60 seconds…"):
+        t0 = time.time()
+        try:
+            resp = httpx.post(f"{API_BASE}/generate", json=payload, timeout=180)
+            elapsed = time.time() - t0
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.ConnectError:
+            st.error("Cannot reach API at localhost:8000.", icon="🚨")
+            st.stop()
+        except Exception as e:
+            st.error(f"Request failed: {e}", icon="🚨")
+            st.stop()
 
-    est_tokens = data.get("tool_calls_made", 1) * 500 + 300
-    est_cost = (model_info["input_cost"] * est_tokens / 1_000_000
-                + model_info["output_cost"] * est_tokens / 1_000_000)
-    st.caption(
-        f"Estimated cost this call: **~${est_cost:.5f}** "
-        f"({est_tokens} est. tokens @ {selected_model_name.split('(')[0].strip()})"
+    wf = data.get("workflow_type", "GENERATION")
+    wf_color = WORKFLOW_COLORS.get(wf, "#888")
+    test_cases = data.get("test_cases", [])
+    tool_calls = data.get("tool_calls_made", 0)
+    retries = data.get("retries", 0)
+    model_used = data.get("model_used", "—").split("/")[-1]
+    summary = data.get("summary", "")
+    est_tokens = tool_calls * 500 + 300
+    est_cost = (model_info["input_cost"] + model_info["output_cost"]) * est_tokens / 1_000_000
+
+    # Status badge + summary
+    st.markdown(
+        f"<span style='background:{wf_color}22;color:{wf_color};"
+        f"padding:4px 14px;border-radius:99px;font-weight:700;font-size:13px'>"
+        f"● {wf}</span> &nbsp; "
+        f"<span style='color:#94a3b8;font-size:14px'>{summary[:140]}</span>",
+        unsafe_allow_html=True,
     )
+    st.markdown("")
 
-    st.markdown(f"**Summary:** {data.get('summary', '')}")
+    # Metrics
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Model", model_used)
+    m2.metric("Tool calls", tool_calls)
+    m3.metric("Retries", retries)
+    m4.metric("Time", f"{elapsed:.1f}s")
+    m5.metric("Est. cost", f"${est_cost:.5f}")
 
     if wf == "QUESTION" and data.get("answer"):
         st.info(data["answer"], icon="💬")
 
-    # ------------------------------------------------------------------
-    # Generated test cases
-    # ------------------------------------------------------------------
-    test_cases = data.get("test_cases", [])
-    if test_cases:
-        st.subheader(f"📋 Generated Test Cases ({len(test_cases)})")
-        for tc in test_cases:
-            with st.expander(f"📄 {tc['file_name']}  —  {tc['title']}", expanded=True):
-                st.markdown(f"**File:** `{tc['file_name']}`")
-                st.code(tc["content"], language="xml")
+    st.divider()
 
-    # ------------------------------------------------------------------
-    # Raw JSON (collapsed)
-    # ------------------------------------------------------------------
-    with st.expander("🔍 Raw API response (JSON)"):
+    # Tabs
+    tab_tc, tab_cost, tab_raw = st.tabs([
+        f"📋 Test Cases ({len(test_cases)})",
+        "💰 Cost Comparison",
+        "🔍 Raw JSON",
+    ])
+
+    with tab_tc:
+        if test_cases:
+            for tc in test_cases:
+                with st.expander(f"📄 {tc['file_name']}  ·  {tc['title']}", expanded=True):
+                    st.code(tc["content"], language="xml")
+        else:
+            st.info("No test case files written in this run.", icon="ℹ️")
+
+    with tab_cost:
+        st.markdown(f"**What this call (~{est_tokens} tokens) would cost on every model:**")
+        st.markdown("")
+
+        rows = []
+        for p_name, p_data in PROVIDERS.items():
+            for m_name, m_data in p_data["models"].items():
+                cost = (m_data["input_cost"] + m_data["output_cost"]) * est_tokens / 1_000_000
+                rows.append((p_name, m_name, cost, m_data["note"], PROVIDERS[p_name]["color"]))
+        rows.sort(key=lambda x: x[2])
+
+        for p_name, m_name, cost, note, color in rows:
+            is_sel = m_name == selected_model_name
+            marker = "▶ " if is_sel else "&nbsp;&nbsp;"
+            vs_selected = est_cost - cost
+            if is_sel:
+                saving_str = "<span style='color:#64748b'>← selected</span>"
+            elif vs_selected > 0:
+                saving_str = f"<span style='color:#22c55e'>saves ${vs_selected:.5f}</span>"
+            else:
+                saving_str = f"<span style='color:#f87171'>+${-vs_selected:.5f}</span>"
+
+            st.markdown(
+                f"<div class='cost-row'>{marker}"
+                f"<span style='color:{color};font-weight:600'>{m_name}</span>"
+                f" &nbsp;<code>${cost:.5f}</code>"
+                f" &nbsp;·&nbsp; {saving_str}"
+                f" &nbsp;·&nbsp; <span style='color:#64748b'>{note}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+    with tab_raw:
         st.json(data)
 
-    # ------------------------------------------------------------------
-    # Cost comparison sidebar callout
-    # ------------------------------------------------------------------
-    st.divider()
-    st.subheader("💡 Cost comparison for this exact call")
-    cols = st.columns(len(MODELS))
-    for i, (name, info) in enumerate(MODELS.items()):
-        cost = (info["input_cost"] * est_tokens / 1_000_000
-                + info["output_cost"] * est_tokens / 1_000_000)
-        short = name.split("(")[0].strip().split("  ")[0]
-        delta = None
-        # Compare to Claude 3.5 Sonnet as baseline
-        sonnet_cost = (3.00 * est_tokens / 1_000_000 + 15.00 * est_tokens / 1_000_000)
-        if cost < sonnet_cost:
-            delta = f"-{((sonnet_cost - cost) / sonnet_cost * 100):.0f}% vs Sonnet"
-        cols[i].metric(short, f"${cost:.5f}", delta=delta, delta_color="inverse")
-
 elif run_btn:
-    st.warning("Please enter a query first.")
+    st.warning("Please enter a request first.", icon="⚠️")
 
 # ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
 st.divider()
 st.caption(
-    "**Atto POC** · LiteLLM Proxy (self-hosted) · "
-    "All models share the same orchestration loop · "
+    "**Atto POC** · LiteLLM Proxy (self-hosted, Docker) · "
+    "Claude · Gemini · GPT-4o — one orchestration loop · "
     "[GitHub](https://github.com/Bharath-Testsigma/POC-001)"
 )
