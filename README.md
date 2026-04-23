@@ -1,5 +1,9 @@
 # POC-001 — Atto AI Test Case Generator
 
+> Demo branch: `demo/litellm-local`
+>
+> This branch is pinned to the local LiteLLM architecture: Streamlit UI, FastAPI orchestration, and a self-hosted LiteLLM proxy on `localhost:4000`. The Cloudflare and Portkey demos live on their own branches.
+
 A proof-of-concept for Testsigma's **Atto** system — an AI agent that turns a plain-English request into structured XML test case files.
 
 **The core idea:** use Claude's API format as the single interface, but transparently route requests to _any_ AI model (Claude, GPT-4o, Gemini, Llama, Mistral) through a proxy. The app never changes its code to switch models or providers — just pick a model from the dropdown.
