@@ -92,14 +92,23 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
                 tool_choice="auto",
-                api_base=settings.openrouter_api_base,
-                api_key=settings.openrouter_api_key,
+                api_base=settings.litellm_proxy_url,
+                api_key=settings.litellm_master_key,
             )
-        except Exception as err:
-            logger.error(
-                f"[{request.conversation_id}] Model '{active_model}' failed on iteration {iteration}: {err}"
-            )
-            raise RuntimeError(f"Model '{active_model}' failed: {err}") from err
+        except Exception as primary_err:
+            logger.warning(f"Model {active_model} failed: {primary_err}. Trying fallback.")
+            try:
+                response = await litellm.acompletion(
+                    model=settings.fallback_model,
+                    messages=messages,
+                    tools=TOOL_DEFINITIONS,
+                    tool_choice="auto",
+                    api_base=settings.litellm_proxy_url,
+                    api_key=settings.litellm_master_key,
+                )
+                active_model = settings.fallback_model
+            except Exception as fallback_err:
+                raise RuntimeError(f"Both models failed. Primary: {primary_err}. Fallback: {fallback_err}")
 
         tracer.log_llm_call(
             model=active_model,
