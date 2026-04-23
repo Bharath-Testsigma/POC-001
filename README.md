@@ -1,5 +1,9 @@
 # POC-001 — Atto AI Test Case Generator
 
+> Demo branch: `demo/cloudflare`
+>
+> This branch is pinned to the Cloudflare Worker architecture for deployment and walkthroughs. The Portkey and LiteLLM demos live on their own branches.
+
 A proof-of-concept for Testsigma's **Atto** system — an AI agent that turns a plain-English request into structured XML test case files.
 
 **The core idea:** use Claude's API format as the single interface, but transparently route requests to _any_ AI model (Claude, GPT-4o, Gemini, Llama, Mistral) through a proxy. The app never changes its code to switch models or providers — just pick a model from the dropdown.
