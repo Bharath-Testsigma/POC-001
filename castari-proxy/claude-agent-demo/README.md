@@ -4,6 +4,13 @@ This branch is the dedicated **Cloudflare demo deployment**. The UI is locked to
 
 This is the main application. It uses the **Claude Agent SDK** with a self-hosted proxy to generate XML test case files from plain-English prompts, with support for any AI model — Claude, Gemini, GPT-4o, Llama, and more.
 
+## What This Branch Is For
+
+- demoing a self-hosted translation proxy
+- routing Claude-compatible SDK traffic through a Cloudflare Worker
+- comparing provider behavior without changing the orchestration loop
+- showcasing direct Gemini/OpenAI paths plus OpenRouter and Ollama options
+
 For demo deployments, you can pin the UI to a single proxy path with:
 
 ```env
@@ -17,6 +24,12 @@ NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
 ```
 
 When that variable is set, the sidebar shows a fixed mode badge and hides the runtime toggle so each deployment can represent one clean architecture story.
+
+For this branch, keep it set to:
+
+```env
+NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare
+```
 
 ## Quick Start
 
@@ -40,6 +53,8 @@ CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
 PORTKEY_API_KEY=pk-...
 NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare
 ```
+
+Only `ANTHROPIC_API_KEY` and `CASTARI_WORKER_URL` are required for the base Cloudflare path. Add provider-specific keys only for the routes you plan to show in the demo.
 
 ## Project Layout
 
@@ -165,3 +180,10 @@ export const ATTO_MODEL_OPTIONS = [
 ```
 
 No other code changes needed. The routing is handled automatically by the model prefix.
+
+## Deployment Checklist
+
+1. Deploy the worker and copy its URL into `CASTARI_WORKER_URL`.
+2. Set `NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare`.
+3. Add only the provider keys you want visible in the demo.
+4. Run `npm run dev` for local walkthroughs or deploy the Next.js app to your hosting platform.
