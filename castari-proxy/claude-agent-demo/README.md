@@ -1,6 +1,22 @@
 # Atto — AI Test Case Generator (Next.js App)
 
+This branch is the dedicated **Cloudflare demo deployment**. The UI is locked to Cloudflare mode so this branch can be deployed as a single-purpose showcase.
+
 This is the main application. It uses the **Claude Agent SDK** with a self-hosted proxy to generate XML test case files from plain-English prompts, with support for any AI model — Claude, Gemini, GPT-4o, Llama, and more.
+
+For demo deployments, you can pin the UI to a single proxy path with:
+
+```env
+NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare
+```
+
+or
+
+```env
+NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
+```
+
+When that variable is set, the sidebar shows a fixed mode badge and hides the runtime toggle so each deployment can represent one clean architecture story.
 
 ## Quick Start
 
@@ -21,6 +37,8 @@ OPENROUTER_API_KEY=sk-or-v1-...
 
 # Your deployed Cloudflare Worker URL (see worker/ README for how to deploy)
 CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
+PORTKEY_API_KEY=pk-...
+NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare
 ```
 
 ## Project Layout

@@ -59,6 +59,21 @@ const EXAMPLE_PROMPTS = [
   'Generate search functionality test cases',
 ];
 
+const FIXED_PROXY_MODE: ProxyMode = 'cloudflare';
+
+const MODE_META: Record<ProxyMode, { label: string; accent: string; summary: string }> = {
+  cloudflare: {
+    label: 'Cloudflare Worker',
+    accent: '#3b82f6',
+    summary: 'Self-hosted translation proxy for direct provider routing.',
+  },
+  portkey: {
+    label: 'Portkey Gateway',
+    accent: '#8b5cf6',
+    summary: 'Managed gateway with provider routing through Portkey virtual keys.',
+  },
+};
+
 /* ================================================================== component */
 
 export function AttoChat() {
@@ -66,8 +81,10 @@ export function AttoChat() {
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [proxyMode, setProxyMode] = useState<ProxyMode>('cloudflare');
-  const [model, setModel] = useState<string>(ATTO_MODEL_OPTIONS[0].value);
+  const [proxyMode, setProxyMode] = useState<ProxyMode>(FIXED_PROXY_MODE ?? 'cloudflare');
+  const [model, setModel] = useState<string>(
+    (FIXED_PROXY_MODE === 'portkey' ? PORTKEY_MODEL_OPTIONS : ATTO_MODEL_OPTIONS)[0].value
+  );
   const [appType, setAppType] = useState<string>(APP_TYPE_OPTIONS[0].value);
   const [usage, setUsage] = useState<ResultEvent['data'] | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -77,7 +94,6 @@ export function AttoChat() {
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
-  const [activeModel, setActiveModel] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const assistantIndexRef = useRef<number | null>(null);
@@ -114,7 +130,6 @@ export function AttoChat() {
       switch (event.type) {
         case 'system':
           setSessionId(event.data.session_id);
-          setActiveModel(event.data.model);
           break;
 
         case 'partial':
@@ -309,7 +324,6 @@ export function AttoChat() {
     setUsage(null);
     setError(null);
     setSessionId(null);
-    setActiveModel(null);
   }, []);
 
   const handleCopy = useCallback(async (text: string) => {
@@ -324,6 +338,7 @@ export function AttoChat() {
   const providerColor = selectedModelInfo ? PROVIDER_COLORS[selectedModelInfo.provider] ?? '#7c8fb3' : '#7c8fb3';
   const modelSupportsThinking = selectedModelInfo?.thinking ?? false;
   const modelToolUse = selectedModelInfo?.toolUse ?? 'full';
+  const modeMeta = MODE_META[proxyMode];
 
   const TOOL_USE_BADGE: Record<string, { label: string; color: string }> = {
     full:    { label: '✓ Tools', color: '#16a34a' },
@@ -340,34 +355,56 @@ export function AttoChat() {
           <span className="ac-brand-sub">Test Case Generator</span>
         </div>
 
-        {/* Proxy mode toggle */}
-        <div className="ac-section">
-          <span className="ac-section-label">Proxy Mode</span>
-          <div style={{ display: 'flex', gap: '0.25rem' }}>
-            {(['cloudflare', 'portkey'] as ProxyMode[]).map((mode) => {
-              const active = proxyMode === mode;
-              const color = mode === 'portkey' ? '#8b5cf6' : '#3b82f6';
-              const label = mode === 'cloudflare' ? '☁ Cloudflare' : '🔑 Portkey';
-              const first = mode === 'cloudflare' ? ATTO_MODEL_OPTIONS[0].value : PORTKEY_MODEL_OPTIONS[0].value;
-              return (
-                <button
-                  key={mode}
-                  disabled={pending}
-                  onClick={() => { setProxyMode(mode); setModel(first); }}
-                  style={{
-                    flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem', fontWeight: 600,
-                    borderRadius: '6px', border: `1px solid ${active ? color : '#334155'}`,
-                    background: active ? `${color}18` : 'transparent',
-                    color: active ? color : '#94a3b8',
-                    cursor: pending ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
+        <div
+          className="ac-section"
+          style={{
+            border: `1px solid ${modeMeta.accent}33`,
+            background: `${modeMeta.accent}10`,
+            borderRadius: '10px',
+            padding: '0.75rem',
+          }}
+        >
+          <span className="ac-section-label" style={{ color: modeMeta.accent }}>
+            Demo Mode
+          </span>
+          <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.95rem' }}>
+            {modeMeta.label}
           </div>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', lineHeight: 1.5, color: '#94a3b8' }}>
+            {modeMeta.summary}
+          </p>
         </div>
+
+        {/* Proxy mode toggle */}
+        {!FIXED_PROXY_MODE && (
+          <div className="ac-section">
+            <span className="ac-section-label">Proxy Mode</span>
+            <div style={{ display: 'flex', gap: '0.25rem' }}>
+              {(['cloudflare', 'portkey'] as ProxyMode[]).map((mode) => {
+                const active = proxyMode === mode;
+                const color = mode === 'portkey' ? '#8b5cf6' : '#3b82f6';
+                const label = mode === 'cloudflare' ? 'Cloudflare' : 'Portkey';
+                const first = mode === 'cloudflare' ? ATTO_MODEL_OPTIONS[0].value : PORTKEY_MODEL_OPTIONS[0].value;
+                return (
+                  <button
+                    key={mode}
+                    disabled={pending}
+                    onClick={() => { setProxyMode(mode); setModel(first); }}
+                    style={{
+                      flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem', fontWeight: 600,
+                      borderRadius: '6px', border: `1px solid ${active ? color : '#334155'}`,
+                      background: active ? `${color}18` : 'transparent',
+                      color: active ? color : '#94a3b8',
+                      cursor: pending ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Model selector */}
         <div className="ac-section">
