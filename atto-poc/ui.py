@@ -14,53 +14,53 @@ API_BASE = "http://localhost:8000"
 # Model catalogue: name, provider, input $/1M tokens, output $/1M tokens
 # ---------------------------------------------------------------------------
 MODELS = {
-    "Gemini Flash 1.5  (default)": {
-        "id": "openrouter/google/gemini-flash-1.5",
-        "input_cost": 0.075,
-        "output_cost": 0.30,
-        "badge": "🟢 Cheapest",
-    },
-    "Gemini Pro 1.5": {
-        "id": "openrouter/google/gemini-pro-1.5",
-        "input_cost": 1.25,
-        "output_cost": 5.00,
-        "badge": "🔵 Balanced",
-    },
-    "Claude 3 Haiku": {
-        "id": "openrouter/anthropic/claude-3-haiku",
-        "input_cost": 0.25,
-        "output_cost": 1.25,
+    "Claude Haiku 4.5  (default)": {
+        "id": "openai/claude-haiku",
+        "input_cost": 0.80,
+        "output_cost": 4.00,
         "badge": "🟡 Fast",
     },
-    "Claude 3.5 Sonnet": {
-        "id": "openrouter/anthropic/claude-3.5-sonnet",
+    "Claude Sonnet 4.6": {
+        "id": "openai/claude-sonnet",
         "input_cost": 3.00,
         "output_cost": 15.00,
         "badge": "🔴 Powerful",
     },
+    "Gemini 2.0 Flash": {
+        "id": "openai/gemini-flash",
+        "input_cost": 0.10,
+        "output_cost": 0.40,
+        "badge": "🟢 Cheapest",
+    },
+    "Gemini 2.0 Flash Lite": {
+        "id": "openai/gemini-flash-lite",
+        "input_cost": 0.075,
+        "output_cost": 0.30,
+        "badge": "🟢 Ultra Cheap",
+    },
+    "Gemini 2.5 Flash": {
+        "id": "openai/gemini-2.5-flash",
+        "input_cost": 0.15,
+        "output_cost": 0.60,
+        "badge": "🔵 Balanced",
+    },
+    "Gemini 2.5 Pro": {
+        "id": "openai/gemini-pro",
+        "input_cost": 1.25,
+        "output_cost": 10.00,
+        "badge": "🔴 Powerful",
+    },
     "GPT-4o Mini": {
-        "id": "openrouter/openai/gpt-4o-mini",
+        "id": "openai/gpt-4o-mini",
         "input_cost": 0.15,
         "output_cost": 0.60,
         "badge": "🟢 Cheap",
     },
     "GPT-4o": {
-        "id": "openrouter/openai/gpt-4o",
+        "id": "openai/gpt-4o",
         "input_cost": 5.00,
         "output_cost": 15.00,
         "badge": "🔴 Premium",
-    },
-    "Mistral Large": {
-        "id": "openrouter/mistralai/mistral-large",
-        "input_cost": 2.00,
-        "output_cost": 6.00,
-        "badge": "🔵 OSS",
-    },
-    "Llama 3.1 70B (free)": {
-        "id": "openrouter/meta-llama/llama-3.1-70b-instruct:free",
-        "input_cost": 0.00,
-        "output_cost": 0.00,
-        "badge": "🆓 Free",
     },
 }
 
@@ -126,7 +126,7 @@ with st.sidebar:
     selected_model_name = st.selectbox(
         "Model",
         list(MODELS.keys()),
-        help="All models route through OpenRouter. Switch freely.",
+        help="All models route through the local LiteLLM proxy. Switch freely.",
     )
     model_info = MODELS[selected_model_name]
     st.caption(f"{model_info['badge']}  |  Input: **${model_info['input_cost']}/1M**  |  Output: **${model_info['output_cost']}/1M**")
@@ -174,7 +174,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 st.title("🤖 Atto POC — AI Test Case Generator")
 st.caption(
-    "Replicates Testsigma's Atto system using **LiteLLM + OpenRouter**. "
+    "Replicates Testsigma's Atto system using **LiteLLM Proxy** (self-hosted). "
     "Swap any model without changing a line of orchestration code."
 )
 
@@ -307,7 +307,7 @@ elif run_btn:
 # ---------------------------------------------------------------------------
 st.divider()
 st.caption(
-    "**Atto POC** · LiteLLM + OpenRouter · "
+    "**Atto POC** · LiteLLM Proxy (self-hosted) · "
     "All models share the same orchestration loop · "
     "[GitHub](https://github.com/Bharath-Testsigma/POC-001)"
 )
