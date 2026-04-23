@@ -1,7 +1,7 @@
 [project]
 name = "atto-poc"
 version = "0.1.0"
-description = "Atto-like AI test case generator using LiteLLM + OpenRouter"
+description = "Atto-like AI test case generator using LiteLLM proxy"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",

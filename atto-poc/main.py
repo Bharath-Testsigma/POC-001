@@ -16,7 +16,7 @@ logging.basicConfig(
 
 app = FastAPI(
     title="Atto POC — AI Test Case Generator",
-    description="Replicates Atto's agentic test generation loop using LiteLLM + OpenRouter.",
+    description="Replicates Atto's agentic test generation loop using a self-hosted LiteLLM proxy.",
     version="0.1.0",
 )
 
