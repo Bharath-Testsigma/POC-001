@@ -6,6 +6,13 @@ Portkey is the only active routing path in this branch. Cloudflare Worker deploy
 
 This is the main application. It uses the **Claude Agent SDK** with a self-hosted proxy to generate XML test case files from plain-English prompts, with support for any AI model — Claude, Gemini, GPT-4o, Llama, and more.
 
+## What This Branch Is For
+
+- demoing a managed gateway instead of a self-hosted worker
+- showing Portkey virtual-key routing across Anthropic, OpenAI, and Google
+- keeping the same orchestration/UI layer while swapping the gateway
+- presenting gateway observability and routing governance as the core value proposition
+
 For demo deployments, you can pin the UI to a single proxy path with:
 
 ```env
@@ -19,6 +26,12 @@ NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
 ```
 
 When that variable is set, the sidebar shows a fixed mode badge and hides the runtime toggle so each deployment can represent one clean architecture story.
+
+For this branch, keep it set to:
+
+```env
+NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
+```
 
 ## Quick Start
 
@@ -34,14 +47,14 @@ npm run dev                  # http://localhost:3000
 # Required — get from console.anthropic.com
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Required for non-Claude models — get from openrouter.ai/keys
-OPENROUTER_API_KEY=sk-or-v1-...
-
-# Your deployed Cloudflare Worker URL (see worker/ README for how to deploy)
-CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
+# Portkey gateway key
 PORTKEY_API_KEY=pk-...
-NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AIza...
+NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
 ```
+
+`CASTARI_WORKER_URL` is not part of this demo path. The Portkey route is handled through the local `/api/portkey` endpoint and forwarded to `https://api.portkey.ai/v1/messages`.
 
 ## Project Layout
 
@@ -75,7 +88,7 @@ User types prompt → clicks Generate
         │
         ▼
 POST /api/generate
-  { query: "...", model: "or:google/gemini-2.5-flash", appType: "web" }
+  { query: "...", model: "pk:google/gemini-2.5-flash", appType: "web" }
         │
         ▼
 startAttoQuery()
@@ -83,13 +96,13 @@ startAttoQuery()
     - systemPrompt: Atto instructions (XML format, workspace path, tool usage rules)
     - allowedTools: ['Read', 'Write', 'Glob', 'Grep']
     - canUseTool:   path-jails Write to .data/workspace/
-    - model:        "or:google/gemini-2.5-flash"
+    - model:        "pk:google/gemini-2.5-flash"
         │
         ▼
 queryCastari()
-  - Reads model prefix → resolves provider (openrouter)
+  - Reads model prefix → resolves provider (portkey)
   - Patches globalThis.fetch to intercept /v1/messages calls
-  - Adds headers: x-castari-provider, x-castari-model, x-castari-wire-model
+  - Adds Portkey auth and provider headers
         │
         ▼
 Claude Agent SDK — query()
@@ -99,15 +112,15 @@ Claude Agent SDK — query()
 [Every fetch to /v1/messages is intercepted]
         │
         ▼
-Your Cloudflare Worker (atto-proxy)
-  Reads headers → routes to OpenRouter
-  Translates Anthropic format → OpenRouter Chat Completions
+Local /api/portkey route
+  Resolves provider from pk: prefix
+  Forwards request to Portkey Gateway
         │
         ▼
-OpenRouter → Gemini 2.5 Flash
+Portkey → Gemini 2.5 Flash
         │
         ▼ (response)
-Worker translates back → Anthropic format
+Portkey returns Anthropic-compatible response
         │
         ▼
 SDK receives response, executes tool calls (Read/Write/Glob)
@@ -167,3 +180,10 @@ export const ATTO_MODEL_OPTIONS = [
 ```
 
 No other code changes needed. The routing is handled automatically by the model prefix.
+
+## Deployment Checklist
+
+1. Set `PORTKEY_API_KEY`.
+2. Set `NEXT_PUBLIC_ATTO_DEMO_MODE=portkey`.
+3. Add only the upstream provider keys needed for the models you want to show.
+4. Run `npm run dev` locally or deploy the Next.js app to your hosting platform.
