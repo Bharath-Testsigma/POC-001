@@ -1,8 +1,8 @@
 # POC-001 — Atto AI Test Case Generator
 
-> Demo branch: `demo/cloudflare`
+> Demo branch: `demo/portkey`
 >
-> This branch is pinned to the Cloudflare Worker architecture for deployment and walkthroughs. The Portkey and LiteLLM demos live on their own branches.
+> This branch is pinned to the Portkey gateway architecture for deployment and walkthroughs. The Cloudflare and LiteLLM demos live on their own branches.
 
 A proof-of-concept for Testsigma's **Atto** system — an AI agent that turns a plain-English request into structured XML test case files.
 

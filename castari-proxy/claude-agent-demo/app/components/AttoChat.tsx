@@ -59,7 +59,7 @@ const EXAMPLE_PROMPTS = [
   'Generate search functionality test cases',
 ];
 
-const FIXED_PROXY_MODE: ProxyMode = 'cloudflare';
+const FIXED_PROXY_MODE: ProxyMode = 'portkey';
 
 const MODE_META: Record<ProxyMode, { label: string; accent: string; summary: string }> = {
   cloudflare: {

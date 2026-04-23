@@ -7,7 +7,7 @@ const envSchema = z.object({
     })
     .min(1, 'ANTHROPIC_API_KEY cannot be empty'),
   CASTARI_WORKER_URL: z
-    .string({ required_error: 'CASTARI_WORKER_URL is required' })
+    .string()
     .url('CASTARI_WORKER_URL must be a valid URL')
     .default('http://127.0.0.1:8787/v1/messages'),
   OPENROUTER_API_KEY: z.string().min(1).optional(),
