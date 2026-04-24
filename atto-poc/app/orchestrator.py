@@ -4,26 +4,21 @@ import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-import litellm
+import httpx
 
 from app.config import settings
 from app.models import GenerateRequest, GenerateResponse, TestCase
 from app.prompts import build_system_prompt, build_user_prompt
 from app.tools import TOOL_DEFINITIONS, execute_tool, read_file, list_files
 from app.hooks import post_write_hook, pre_delete_hook, HookError
-from app.tracer import PortkeyTracer
 
 logger = logging.getLogger(__name__)
 
-litellm.drop_params = True
-
 
 def _parse_output_block(text: str) -> dict:
-    """Extract workflow_type and summary from <output>...</output> block."""
     match = re.search(r"<output>(.*?)</output>", text, re.DOTALL | re.IGNORECASE)
     if not match:
         return {"workflow_type": "GENERATION", "summary": text.strip()}
-
     block = match.group(1).strip()
     result = {}
     for line in block.splitlines():
@@ -31,7 +26,6 @@ def _parse_output_block(text: str) -> dict:
         if ":" in line:
             key, _, value = line.partition(":")
             result[key.strip().lower()] = value.strip()
-
     return {
         "workflow_type": result.get("workflow_type", "GENERATION").upper(),
         "summary": result.get("summary", block),
@@ -39,7 +33,6 @@ def _parse_output_block(text: str) -> dict:
 
 
 def _extract_title_from_xml(content: str) -> str:
-    """Parse title from XML test case content."""
     try:
         root = ET.fromstring(content)
         title_el = root.find("title")
@@ -51,7 +44,6 @@ def _extract_title_from_xml(content: str) -> str:
 
 
 def _collect_test_cases(written_files: set[str]) -> list[TestCase]:
-    """Read all written XML files and build TestCase objects."""
     test_cases = []
     for file_name in sorted(written_files):
         try:
@@ -63,10 +55,30 @@ def _collect_test_cases(written_files: set[str]) -> list[TestCase]:
     return test_cases
 
 
-async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
-    tracer = PortkeyTracer(trace_id=request.conversation_id)
+async def _chat_completion(
+    client: httpx.AsyncClient,
+    model: str,
+    messages: list[dict],
+) -> dict:
+    # All providers go through Bifrost's unified OpenAI-compatible endpoint.
+    # Bifrost reads provider keys from env vars (configured in bifrost-config.json).
+    response = await client.post(
+        f"{settings.bifrost_url}/v1/chat/completions",
+        headers={"Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": messages,
+            "tools": TOOL_DEFINITIONS,
+            "tool_choice": "auto",
+        },
+    )
+    if not response.is_success:
+        logger.error(f"Bifrost error {response.status_code}: {response.text}")
+    response.raise_for_status()
+    return response.json()
 
-    # Per-request model override (from UI model selector)
+
+async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
     active_model = request.model or settings.default_model
 
     system_prompt = build_system_prompt(request.app_type, request.existing_files)
@@ -82,140 +94,115 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
     written_files: set[str] = set()
     iteration = 0
 
-    while iteration < settings.max_iterations:
-        iteration += 1
-        logger.info(f"[{request.conversation_id}] Iteration {iteration} model={active_model}")
-
-        try:
-            response = await litellm.acompletion(
-                model=active_model,
-                messages=messages,
-                tools=TOOL_DEFINITIONS,
-                tool_choice="auto",
-                api_base=settings.litellm_proxy_url,
-                api_key=settings.litellm_master_key,
-            )
-        except Exception as primary_err:
-            logger.warning(f"Model {active_model} failed: {primary_err}. Trying fallback.")
-            try:
-                response = await litellm.acompletion(
-                    model=settings.fallback_model,
-                    messages=messages,
-                    tools=TOOL_DEFINITIONS,
-                    tool_choice="auto",
-                    api_base=settings.litellm_proxy_url,
-                    api_key=settings.litellm_master_key,
-                )
-                active_model = settings.fallback_model
-            except Exception as fallback_err:
-                raise RuntimeError(f"Both models failed. Primary: {primary_err}. Fallback: {fallback_err}")
-
-        tracer.log_llm_call(
-            model=active_model,
-            messages=messages,
-            response=response,
-        )
-
-        choice = response.choices[0]
-        assistant_message = choice.message
-
-        # Append assistant turn to conversation
-        messages.append({"role": "assistant", "content": assistant_message.content, "tool_calls": getattr(assistant_message, "tool_calls", None)})
-
-        # No tool calls → LLM is done
-        if not getattr(assistant_message, "tool_calls", None):
-            final_text = assistant_message.content or ""
-            parsed = _parse_output_block(final_text)
-            test_cases = _collect_test_cases(written_files)
-            return GenerateResponse(
-                conversation_id=request.conversation_id,
-                workflow_type=parsed["workflow_type"],
-                answer=parsed["summary"] if parsed["workflow_type"] == "QUESTION" else None,
-                test_cases=test_cases,
-                summary=parsed["summary"],
-                tool_calls_made=total_tool_calls,
-                retries=total_retries,
-                model_used=active_model,
-            )
-
-        # Execute each tool call
-        tool_results = []
-        hook_error: str | None = None
-
-        for tool_call in assistant_message.tool_calls:
-            total_tool_calls += 1
-            tool_name = tool_call.function.name
-            try:
-                args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError as parse_err:
-                logger.warning(
-                    f"[{request.conversation_id}] Could not parse args for tool '{tool_name}': {parse_err} "
-                    f"| raw='{tool_call.function.arguments[:200]}'"
-                )
-                tool_results.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": f"ERROR: Model sent malformed JSON arguments for tool '{tool_name}': {parse_err}",
-                })
-                continue
-
-            tracer.log_tool_call(tool_name, args, "")
+    async with httpx.AsyncClient(timeout=180) as client:
+        while iteration < settings.max_iterations:
+            iteration += 1
+            logger.info(f"[{request.conversation_id}] Iteration {iteration} model={active_model}")
 
             try:
-                # Pre-hooks
-                if tool_name == "DeleteFile":
-                    pre_delete_hook(args.get("path", ""), request.existing_files)
+                response = await _chat_completion(client, active_model, messages)
+            except Exception as primary_err:
+                logger.warning(f"Model {active_model} failed: {primary_err}. Trying fallback.")
+                try:
+                    response = await _chat_completion(client, settings.fallback_model, messages)
+                    active_model = settings.fallback_model
+                except Exception as fallback_err:
+                    raise RuntimeError(f"Both models failed. Primary: {primary_err}. Fallback: {fallback_err}")
 
-                result = execute_tool(tool_name, args)
+            choice = response["choices"][0]
+            assistant_message = choice["message"]
+            tool_calls = assistant_message.get("tool_calls") or []
 
-                # Post-hooks
-                if tool_name == "WriteFile":
-                    post_write_hook(args["path"], args["content"])
-                    written_files.add(Path(args["path"]).name)
-
-                tracer.log_tool_call(tool_name, args, result)
-                tool_results.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": result,
-                })
-
-            except HookError as he:
-                hook_error = str(he)
-                tool_results.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": f"ERROR: {hook_error}",
-                })
-                break  # Stop processing further tool calls in this batch
-
-            except Exception as e:
-                err_msg = f"Tool execution error: {e}"
-                tool_results.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": err_msg,
-                })
-
-        messages.extend(tool_results)
-
-        # If a hook error occurred, inject a retry instruction
-        if hook_error and total_retries < settings.max_retries:
-            total_retries += 1
             messages.append({
-                "role": "user",
-                "content": (
-                    f"A validation error occurred: {hook_error} "
-                    f"Please fix the issue and try again. "
-                    f"Retry {total_retries}/{settings.max_retries}."
-                ),
+                "role": "assistant",
+                "content": assistant_message.get("content"),
+                **({"tool_calls": tool_calls} if tool_calls else {}),
             })
 
-    # Exceeded max iterations — return whatever was collected
+            if not tool_calls:
+                final_text = assistant_message.get("content") or ""
+                if isinstance(final_text, list):
+                    final_text = " ".join(b.get("text", "") for b in final_text if b.get("type") == "text")
+                parsed = _parse_output_block(final_text)
+                test_cases = _collect_test_cases(written_files)
+                return GenerateResponse(
+                    conversation_id=request.conversation_id,
+                    workflow_type=parsed["workflow_type"],
+                    answer=parsed["summary"] if parsed["workflow_type"] == "QUESTION" else None,
+                    test_cases=test_cases,
+                    summary=parsed["summary"],
+                    tool_calls_made=total_tool_calls,
+                    retries=total_retries,
+                    model_used=active_model,
+                )
+
+            tool_results = []
+            hook_error: str | None = None
+
+            for tool_call in tool_calls:
+                total_tool_calls += 1
+                tool_name = tool_call["function"]["name"]
+                raw_args = tool_call["function"].get("arguments", "{}")
+                try:
+                    args = json.loads(raw_args)
+                except json.JSONDecodeError as parse_err:
+                    logger.warning(f"[{request.conversation_id}] Malformed args for '{tool_name}': {parse_err}")
+                    tool_results.append({
+                        "tool_call_id": tool_call["id"],
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": f"ERROR: malformed JSON arguments: {parse_err}",
+                    })
+                    continue
+
+                try:
+                    if tool_name == "DeleteFile":
+                        pre_delete_hook(args.get("path", ""), request.existing_files)
+
+                    result = execute_tool(tool_name, args)
+
+                    if tool_name == "WriteFile":
+                        post_write_hook(args["path"], args["content"])
+                        written_files.add(Path(args["path"]).name)
+
+                    tool_results.append({
+                        "tool_call_id": tool_call["id"],
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": result,
+                    })
+
+                except HookError as he:
+                    hook_error = str(he)
+                    tool_results.append({
+                        "tool_call_id": tool_call["id"],
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": f"ERROR: {hook_error}",
+                    })
+                    break
+
+                except Exception as e:
+                    tool_results.append({
+                        "tool_call_id": tool_call["id"],
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": f"Tool execution error: {e}",
+                    })
+
+            messages.extend(tool_results)
+
+            if hook_error and total_retries < settings.max_retries:
+                total_retries += 1
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"A validation error occurred: {hook_error} "
+                        f"Please fix the issue and try again. "
+                        f"Retry {total_retries}/{settings.max_retries}."
+                    ),
+                })
+
     logger.warning(f"[{request.conversation_id}] Max iterations reached.")
     test_cases = _collect_test_cases(written_files)
     return GenerateResponse(
