@@ -74,14 +74,14 @@ def _coerce_text(content: object) -> str:
     return ""
 
 
-def _provider_key(model: str) -> str:
-    """Return the correct upstream API key based on model prefix."""
+def _route(model: str) -> str:
+    """Return provider family: openai | anthropic | google."""
     m = model.lower()
     if m.startswith("anthropic/") or "claude" in m:
-        return settings.anthropic_api_key
+        return "anthropic"
     if m.startswith("google/") or "gemini" in m:
-        return settings.google_api_key
-    return settings.openai_api_key  # openai/ prefix or gpt-* fallback
+        return "google"
+    return "openai"
 
 
 async def _chat_completion(
@@ -89,22 +89,97 @@ async def _chat_completion(
     model: str,
     messages: list[dict],
 ) -> dict:
+    provider = _route(model)
+
+    if provider == "openai":
+        # Route through Helicone gateway (OpenAI-compatible)
+        response = await client.post(
+            f"{settings.helicone_gateway_url.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Helicone-Auth": f"Bearer {settings.helicone_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": model, "messages": messages, "tools": TOOL_DEFINITIONS, "tool_choice": "auto"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    if provider == "anthropic":
+        # Direct Anthropic messages API — gateway doesn't support Anthropic yet
+        model_id = model.removeprefix("anthropic/")
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": settings.anthropic_api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model_id,
+                "max_tokens": 8192,
+                "system": next((m["content"] for m in messages if m["role"] == "system"), ""),
+                "messages": [m for m in messages if m["role"] != "system"],
+                "tools": [
+                    {
+                        "name": t["function"]["name"],
+                        "description": t["function"].get("description", ""),
+                        "input_schema": t["function"].get("parameters", {}),
+                    }
+                    for t in TOOL_DEFINITIONS
+                ],
+            },
+        )
+        response.raise_for_status()
+        return _anthropic_to_openai(response.json(), model_id)
+
+    # Google — OpenAI-compatible endpoint
+    model_id = model.removeprefix("google/")
     response = await client.post(
-        f"{settings.helicone_gateway_url.rstrip('/')}/chat/completions",
+        f"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         headers={
-            "Authorization": f"Bearer {_provider_key(model)}",
-            "Helicone-Auth": f"Bearer {settings.helicone_api_key}",
+            "Authorization": f"Bearer {settings.google_api_key}",
             "Content-Type": "application/json",
         },
-        json={
-            "model": model,
-            "messages": messages,
-            "tools": TOOL_DEFINITIONS,
-            "tool_choice": "auto",
-        },
+        json={"model": model_id, "messages": messages, "tools": TOOL_DEFINITIONS, "tool_choice": "auto"},
     )
     response.raise_for_status()
     return response.json()
+
+
+def _anthropic_to_openai(resp: dict, model_id: str) -> dict:
+    """Normalise Anthropic /v1/messages response to OpenAI chat completions shape."""
+    content_blocks = resp.get("content", [])
+    text = " ".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
+    tool_calls = [
+        {
+            "id": b.get("id", ""),
+            "type": "function",
+            "function": {"name": b["name"], "arguments": json.dumps(b.get("input", {}))},
+        }
+        for b in content_blocks if b.get("type") == "tool_use"
+    ]
+    stop_reason = resp.get("stop_reason", "end_turn")
+    finish_reason = "tool_calls" if tool_calls else ("stop" if stop_reason == "end_turn" else stop_reason)
+    return {
+        "id": resp.get("id", ""),
+        "model": model_id,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": text or None,
+                    **({"tool_calls": tool_calls} if tool_calls else {}),
+                },
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": resp.get("usage", {}).get("input_tokens", 0),
+            "completion_tokens": resp.get("usage", {}).get("output_tokens", 0),
+        },
+    }
 
 
 async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
