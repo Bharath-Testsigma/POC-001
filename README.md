@@ -1,6 +1,6 @@
 # POC-001 — Atto AI Test Case Generator
 
-> Default demo branch target: `demo/litellm-local`
+> Default demo branch target: `helicone`
 
 This repository demonstrates the same test-case-generation workflow behind three different proxy strategies:
 
@@ -8,16 +8,16 @@ This repository demonstrates the same test-case-generation workflow behind three
 |---|---|---|---|
 | `demo/cloudflare` | Cloudflare Worker | Next.js + Claude Agent SDK + Cloudflare Worker | showing a self-hosted translation gateway |
 | `demo/portkey` | Portkey Gateway | Next.js + Claude Agent SDK + Portkey | showing managed routing, virtual keys, and gateway observability |
-| `demo/litellm-local` | LiteLLM Local | Streamlit + FastAPI + LiteLLM | showing a local/self-hosted proxy layer and cheap provider routing |
+| `helicone` | Helicone OSS | Streamlit + FastAPI + self-hosted Helicone AI Gateway | showing a local open-source proxy layer with unified provider routing |
 
-You are currently on the **LiteLLM local** branch. This branch is the best candidate for the default branch because it is the most self-contained demo and can be run locally without depending on Cloudflare or Portkey infrastructure.
+You are currently on the **Helicone OSS** branch. This branch is the most self-contained local demo for showing a self-hosted open-source gateway without depending on Cloudflare or Portkey infrastructure.
 
-## LiteLLM Local Architecture
+## Helicone OSS Architecture
 
 ```text
 Streamlit UI
   -> FastAPI orchestrator
-    -> LiteLLM proxy on localhost:4000
+    -> Helicone AI Gateway on localhost:8080/ai
       -> Anthropic / Google / OpenAI
 ```
 
@@ -25,7 +25,7 @@ What this branch proves:
 
 - the orchestration loop stays the same while models change
 - the UI talks to your own backend, not directly to providers
-- LiteLLM acts as the proxy layer and provider router
+- Helicone acts as the proxy layer and provider router
 - provider failure can fall back to another model
 
 ## Quick Start
@@ -43,12 +43,12 @@ Open:
 
 - Streamlit UI: `http://localhost:8501`
 - FastAPI API: `http://localhost:8000`
-- LiteLLM health: `http://localhost:4000/health/liveliness`
+- Helicone models endpoint: `http://localhost:8080/ai/models`
 
 ## Documentation
 
-- LiteLLM local guide: [atto-poc/README.md](./atto-poc/README.md)
-- LiteLLM local env template: [atto-poc/.env.example](./atto-poc/.env.example)
+- Helicone local guide: [atto-poc/README.md](./atto-poc/README.md)
+- Helicone local env template: [atto-poc/.env.example](./atto-poc/.env.example)
 - Cloudflare demo app guide: [castari-proxy/claude-agent-demo/README.md](./castari-proxy/claude-agent-demo/README.md)
 
 ## Other Demo Branches
@@ -67,12 +67,12 @@ Open:
 
 ## Validation Notes
 
-This LiteLLM branch was smoke-tested locally with:
+This branch should be smoke-tested locally with:
 
-- healthy LiteLLM container on `localhost:4000`
+- healthy Helicone gateway on `localhost:8080`
 - live FastAPI API on `localhost:8000`
 - successful `/generate` request producing XML test cases
-- successful fallback from Gemini quota exhaustion to `gpt-4o-mini`
+- successful fallback from the primary model to `gpt-4o-mini`
 
 ## Using the App
 
@@ -227,4 +227,4 @@ The production Atto system (`alpha` + `atto-browser-agent-v2`) already routes th
 
 ## Legacy Python POC
 
-`atto-poc/` contains the original Python implementation using FastAPI + LiteLLM + Streamlit. It's kept for reference to show the same multi-model idea in a simpler form. The TypeScript version here supersedes it by using the Claude Agent SDK for native tool streaming, session resumption, extended thinking, and MCP support.
+`atto-poc/` contains the local Python implementation using FastAPI + Streamlit with a self-hosted Helicone gateway. It's kept as the simplest end-to-end local demo, while the TypeScript version supersedes it for Claude Agent SDK features such as native tool streaming, session resumption, extended thinking, and MCP support.

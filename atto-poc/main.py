@@ -15,8 +15,8 @@ logging.basicConfig(
 )
 
 app = FastAPI(
-    title="Atto POC — LiteLLM Local Demo",
-    description="Mode 3 demo: Atto-style test generation using FastAPI plus a self-hosted LiteLLM proxy.",
+    title="Atto POC — Helicone OSS Demo",
+    description="Mode 3 demo: Atto-style test generation using FastAPI plus a self-hosted Helicone AI Gateway.",
     version="0.1.0",
 )
 

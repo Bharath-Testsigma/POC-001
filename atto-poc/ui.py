@@ -1,5 +1,5 @@
 """
-Atto POC — LiteLLM Local Demo UI
+Atto POC — Helicone OSS Demo UI
 Run with: uv run streamlit run ui.py
 """
 
@@ -8,6 +8,7 @@ import httpx
 import streamlit as st
 
 API_BASE = "http://localhost:8000"
+GATEWAY_MODELS_URL = "http://localhost:8080/ai/models"
 
 # ---------------------------------------------------------------------------
 # Model catalogue grouped by provider
@@ -17,14 +18,14 @@ PROVIDERS = {
         "color": "#d97706",
         "models": {
             "Claude Haiku 4.5": {
-                "id": "openai/claude-haiku",
+                "id": "anthropic/claude-3-5-haiku-latest",
                 "input_cost": 0.80,
                 "output_cost": 4.00,
                 "note": "Fast & cheap · Best for demos",
                 "default": True,
             },
             "Claude Sonnet 4.6": {
-                "id": "openai/claude-sonnet",
+                "id": "anthropic/claude-3-7-sonnet",
                 "input_cost": 3.00,
                 "output_cost": 15.00,
                 "note": "Most capable Claude",
@@ -36,28 +37,28 @@ PROVIDERS = {
         "color": "#2563eb",
         "models": {
             "Gemini 2.0 Flash": {
-                "id": "openai/gemini-flash",
+                "id": "google/gemini-2.0-flash",
                 "input_cost": 0.10,
                 "output_cost": 0.40,
                 "note": "Cheapest · Great quality",
                 "default": False,
             },
             "Gemini 2.0 Flash Lite": {
-                "id": "openai/gemini-flash-lite",
+                "id": "google/gemini-2.0-flash-lite",
                 "input_cost": 0.075,
                 "output_cost": 0.30,
                 "note": "Ultra cheap",
                 "default": False,
             },
             "Gemini 2.5 Flash": {
-                "id": "openai/gemini-2.5-flash",
+                "id": "google/gemini-2.5-flash",
                 "input_cost": 0.15,
                 "output_cost": 0.60,
                 "note": "Balanced speed & quality",
                 "default": False,
             },
             "Gemini 2.5 Pro": {
-                "id": "openai/gemini-pro",
+                "id": "google/gemini-2.5-pro",
                 "input_cost": 1.25,
                 "output_cost": 10.00,
                 "note": "Most capable Gemini",
@@ -137,7 +138,7 @@ WORKFLOW_COLORS = {"GENERATION": "#22c55e", "EDIT": "#3b82f6", "QUESTION": "#f59
 # Page setup
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Atto POC — LiteLLM Local Demo",
+    page_title="Atto POC — Helicone OSS Demo",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -193,7 +194,7 @@ def check_services():
     except Exception:
         results["api"] = False
     try:
-        httpx.get("http://localhost:4000/health/liveliness", timeout=2)
+        httpx.get(GATEWAY_MODELS_URL, timeout=2)
         results["proxy"] = True
     except Exception:
         results["proxy"] = False
@@ -213,7 +214,7 @@ with st.sidebar:
 
     col_a, col_b = st.columns(2)
     col_a.markdown(
-        f"{'🟢' if proxy_ok else '🔴'} **LiteLLM**<br><small>:4000</small>",
+        f"{'🟢' if proxy_ok else '🔴'} **Helicone**<br><small>:8080/ai</small>",
         unsafe_allow_html=True,
     )
     col_b.markdown(
@@ -289,20 +290,20 @@ with st.sidebar:
     st.markdown("""
 <div class='arch-box'>
 UI → FastAPI :8000<br>
-&nbsp;&nbsp;&nbsp;→ LiteLLM :4000<br>
+&nbsp;&nbsp;&nbsp;→ Helicone :8080/ai<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Anthropic / Google / OpenAI
 </div>
 """, unsafe_allow_html=True)
-    st.caption("Mode 3: local FastAPI orchestration with a self-hosted LiteLLM proxy.")
+    st.caption("Mode 3: local FastAPI orchestration with a self-hosted Helicone OSS gateway.")
 
 
 # ---------------------------------------------------------------------------
 # MAIN PANEL — Header
 # ---------------------------------------------------------------------------
-st.markdown("# 🤖 Atto — LiteLLM Local Demo")
+st.markdown("# 🤖 Atto — Helicone OSS Demo")
 st.markdown(
     "Mode 3 of the Atto proxy POC. Type a natural-language request and the local stack "
-    "routes it through FastAPI and LiteLLM before generating structured **XML test cases**. "
+    "routes it through FastAPI and Helicone before generating structured **XML test cases**. "
     "Switch models freely while keeping the orchestration loop unchanged."
 )
 
@@ -484,7 +485,7 @@ elif run_btn:
 # ---------------------------------------------------------------------------
 st.divider()
 st.caption(
-    "**Atto POC — Mode 3** · LiteLLM Proxy (self-hosted, Docker) · "
+    "**Atto POC — Mode 3** · Helicone OSS Gateway (self-hosted, Docker) · "
     "Claude · Gemini · GPT-4o — one orchestration loop · "
     "[GitHub](https://github.com/Bharath-Testsigma/POC-001)"
 )
