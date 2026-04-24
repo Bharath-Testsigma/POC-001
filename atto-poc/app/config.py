@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_api_key: str = ""
+    portkey_api_key: str = ""
     default_model: str = "google/gemini-2.5-flash"
     fallback_model: str = "openai/gpt-4o-mini"
     workspace_dir: str = "workspace"
