@@ -7,7 +7,9 @@ class Settings(BaseSettings):
 
     helicone_gateway_url: str = "http://localhost:8080/ai"
     helicone_api_key: str = "placeholder-api-key"
-    portkey_api_key: str = ""
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    google_api_key: str = ""
     default_model: str = "google/gemini-2.5-flash"
     fallback_model: str = "openai/gpt-4o-mini"
     workspace_dir: str = "workspace"

@@ -74,6 +74,16 @@ def _coerce_text(content: object) -> str:
     return ""
 
 
+def _provider_key(model: str) -> str:
+    """Return the correct upstream API key based on model prefix."""
+    m = model.lower()
+    if m.startswith("anthropic/") or "claude" in m:
+        return settings.anthropic_api_key
+    if m.startswith("google/") or "gemini" in m:
+        return settings.google_api_key
+    return settings.openai_api_key  # openai/ prefix or gpt-* fallback
+
+
 async def _chat_completion(
     client: httpx.AsyncClient,
     model: str,
@@ -82,7 +92,8 @@ async def _chat_completion(
     response = await client.post(
         f"{settings.helicone_gateway_url.rstrip('/')}/chat/completions",
         headers={
-            "Authorization": f"Bearer {settings.helicone_api_key}",
+            "Authorization": f"Bearer {_provider_key(model)}",
+            "Helicone-Auth": f"Bearer {settings.helicone_api_key}",
             "Content-Type": "application/json",
         },
         json={
