@@ -1,5 +1,5 @@
 """
-Atto POC — LiteLLM Local Demo UI
+Atto POC — Streamlit Demo UI
 Run with: uv run streamlit run ui.py
 """
 
@@ -137,7 +137,7 @@ WORKFLOW_COLORS = {"GENERATION": "#22c55e", "EDIT": "#3b82f6", "QUESTION": "#f59
 # Page setup
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Atto POC — LiteLLM Local Demo",
+    page_title="Atto POC — AI Test Generator",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -204,7 +204,7 @@ def check_services():
 # SIDEBAR
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("## ⚙️ Mode 3 Configuration")
+    st.markdown("## ⚙️ Configuration")
 
     # Service status
     services = check_services()
@@ -285,7 +285,7 @@ with st.sidebar:
     st.divider()
 
     # Architecture
-    st.markdown("### 🏗️ Mode 3 Flow")
+    st.markdown("### 🏗️ Flow")
     st.markdown("""
 <div class='arch-box'>
 UI → FastAPI :8000<br>
@@ -293,17 +293,17 @@ UI → FastAPI :8000<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ Anthropic / Google / OpenAI
 </div>
 """, unsafe_allow_html=True)
-    st.caption("Mode 3: local FastAPI orchestration with a self-hosted LiteLLM proxy.")
+    st.caption("One orchestration loop, any model.")
 
 
 # ---------------------------------------------------------------------------
 # MAIN PANEL — Header
 # ---------------------------------------------------------------------------
-st.markdown("# 🤖 Atto — LiteLLM Local Demo")
+st.markdown("# 🤖 Atto — AI Test Case Generator POC")
 st.markdown(
-    "Mode 3 of the Atto proxy POC. Type a natural-language request and the local stack "
-    "routes it through FastAPI and LiteLLM before generating structured **XML test cases**. "
-    "Switch models freely while keeping the orchestration loop unchanged."
+    "Type a natural-language request → agent reads the workspace, writes structured "
+    "**XML test cases**, validates them, and returns results. "
+    "Switch models freely — the orchestration code never changes."
 )
 
 st.divider()
@@ -484,7 +484,7 @@ elif run_btn:
 # ---------------------------------------------------------------------------
 st.divider()
 st.caption(
-    "**Atto POC — Mode 3** · LiteLLM Proxy (self-hosted, Docker) · "
+    "**Atto POC** · LiteLLM Proxy (self-hosted, Docker) · "
     "Claude · Gemini · GPT-4o — one orchestration loop · "
     "[GitHub](https://github.com/Bharath-Testsigma/POC-001)"
 )

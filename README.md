@@ -1,78 +1,218 @@
 # POC-001 — Atto AI Test Case Generator
 
-> Default demo branch target: `demo/litellm-local`
+A proof-of-concept for Testsigma's **Atto** system — an AI agent that turns a plain-English request into structured XML test case files.
 
-This repository demonstrates the same test-case-generation workflow behind three different proxy strategies:
+**The core idea:** use Claude's API format as the single interface, but transparently route requests to _any_ AI model (Claude, GPT-4o, Gemini, Llama, Mistral) through a proxy. The app never changes its code to switch models or providers — just pick a model from the dropdown.
 
-| Branch | Mode | Stack | Best for |
-|---|---|---|---|
-| `demo/cloudflare` | Cloudflare Worker | Next.js + Claude Agent SDK + Cloudflare Worker | showing a self-hosted translation gateway |
-| `demo/portkey` | Portkey Gateway | Next.js + Claude Agent SDK + Portkey | showing managed routing, virtual keys, and gateway observability |
-| `demo/litellm-local` | LiteLLM Local | Streamlit + FastAPI + LiteLLM | showing a local/self-hosted proxy layer and cheap provider routing |
+**Two proxy modes are supported**, toggled from the UI:
 
-You are currently on the **LiteLLM local** branch. This branch is the best candidate for the default branch because it is the most self-contained demo and can be run locally without depending on Cloudflare or Portkey infrastructure.
+| Mode | Gateway | Models |
+|---|---|---|
+| **Mode 1 — Cloudflare** | Your own Cloudflare Worker | Claude (direct), OpenRouter models, Google Gemini (direct), OpenAI (direct), Ollama (local) |
+| **Mode 2 — Portkey** | Portkey managed gateway | Claude, GPT-4o, Gemini via Portkey's unified API |
 
-## LiteLLM Local Architecture
+---
 
-```text
-Streamlit UI
-  -> FastAPI orchestrator
-    -> LiteLLM proxy on localhost:4000
-      -> Anthropic / Google / OpenAI
+## How It Works
+
+### Mode 1 — Cloudflare + OpenRouter
+
+```
+Browser
+  │  POST /api/generate { query, model }
+  ▼
+Next.js API Route
+  │  Claude Agent SDK  (queryCastari intercepts fetch)
+  ▼
+Cloudflare Worker  (atto-proxy — your self-hosted)
+  │
+  │  reads x-castari-provider header
+  │
+  ├── model = "claude-*"         → Anthropic API (pass-through)
+  ├── model = "or:vendor/model"  → OpenRouter (translates Anthropic ↔ OpenAI format)
+  ├── model = "g:gemini-*"       → Google Gemini API (translates format)
+  └── model = "o:gpt-*"         → OpenAI API (translates format)
 ```
 
-What this branch proves:
+The Cloudflare Worker handles all format translation between Anthropic's message schema and each provider's API — tool calls, streaming events, stop reasons, image content, everything.
 
-- the orchestration loop stays the same while models change
-- the UI talks to your own backend, not directly to providers
-- LiteLLM acts as the proxy layer and provider router
-- provider failure can fall back to another model
+### Mode 2 — Portkey
 
-## Quick Start
+```
+Browser
+  │  POST /api/generate { query, model }
+  ▼
+Next.js API Route
+  │  Claude Agent SDK  (queryCastari intercepts fetch)
+  ▼
+Portkey Gateway  (managed service — api.portkey.ai)
+  │
+  │  reads x-portkey-provider header
+  │
+  ├── model = "pk:anthropic/..."  → Anthropic
+  ├── model = "pk:openai/..."     → OpenAI
+  └── model = "pk:google/..."     → Google
+```
+
+Portkey exposes an Anthropic-compatible endpoint. The Claude Agent SDK sees no difference — it still talks the same language. Portkey handles translation internally and gives you a dashboard showing usage, cost, and latency across providers.
+
+### The fetch interceptor (the key mechanism)
+
+The Claude Agent SDK is designed to talk exclusively to `api.anthropic.com`. To support other providers, `queryCastari.ts` patches `globalThis.fetch` once per process:
+
+```
+SDK calls fetch("https://<proxy>/v1/messages", body)
+         ↓
+Interceptor fires (URL matches /v1/messages)
+         ↓
+Injects routing headers (provider, model, credentials)
+         ↓
+Request forwarded to proxy (Cloudflare Worker or Portkey)
+         ↓
+Proxy routes to actual provider, translates response
+         ↓
+SDK receives Anthropic-format response — it never knew the difference
+```
+
+The app model prefix determines which proxy path is taken:
+
+| Prefix | Provider | Gateway |
+|--------|----------|---------|
+| `claude-` | Anthropic | Cloudflare (pass-through) |
+| `or:vendor/model` | OpenRouter | Cloudflare |
+| `g:gemini-*` | Google Gemini | Cloudflare |
+| `o:gpt-*` | OpenAI | Cloudflare |
+| `ollama:model` | Local Ollama | Local proxy route |
+| `pk:provider/model` | Portkey gateway | Portkey |
+
+---
+
+## Project Structure
+
+```
+POC-001/
+├── castari-proxy/
+│   ├── claude-agent-demo/          ← Main application (Next.js + TypeScript)
+│   │   ├── app/
+│   │   │   ├── api/
+│   │   │   │   ├── generate/       ← Streaming test-case generation endpoint
+│   │   │   │   ├── workspace/      ← List & clear generated XML files
+│   │   │   │   └── ollama/         ← Local Ollama proxy route
+│   │   │   ├── components/
+│   │   │   │   └── AttoChat.tsx    ← Main UI (3-panel layout + mode toggle)
+│   │   │   └── globals.css
+│   │   └── lib/
+│   │       ├── agent/
+│   │       │   ├── atto-session.ts ← Session builder: prompt, tools, env, base URL
+│   │       │   └── atto-config.ts  ← Model lists (Cloudflare + Portkey), app-type options
+│   │       ├── policy/
+│   │       │   └── permission.ts   ← Tool allow-list, Write path jail
+│   │       ├── env.ts              ← Zod-validated env schema
+│   │       └── castariProxy.ts     ← Re-exports queryCastari from the package
+│   │
+│   ├── src/                        ← queryCastari package source
+│   │   └── queryCastari.ts         ← Fetch interceptor + provider/model routing logic
+│   │
+│   └── worker/                     ← Cloudflare Worker (Mode 1 proxy)
+│       ├── src/
+│       │   ├── index.ts            ← Entry: reads headers, routes to provider
+│       │   ├── translator.ts       ← Anthropic ↔ OpenAI format conversion
+│       │   ├── stream.ts           ← SSE streaming conversion
+│       │   ├── provider.ts         ← Provider detection, server-tool handling
+│       │   └── config.ts           ← Worker environment config
+│       └── wrangler.toml           ← Cloudflare deployment config
+│
+└── atto-poc/                       ← Original Python POC (kept for reference)
+    ├── main.py                     ← FastAPI server
+    ├── app/orchestrator.py         ← Agentic loop using LiteLLM
+    └── ui.py                       ← Streamlit demo UI
+```
+
+---
+
+## Prerequisites
+
+- **Node.js 18+**
+- **Anthropic API key** — [console.anthropic.com](https://console.anthropic.com) *(always required — the Agent SDK runs on Claude)*
+
+**For Mode 1 (Cloudflare):**
+- **Cloudflare account** — [cloudflare.com](https://cloudflare.com) *(free tier is enough)*
+- **OpenRouter API key** — [openrouter.ai/keys](https://openrouter.ai/keys) *(for Gemini, GPT-4o, Llama, Mistral via OpenRouter)*
+- **Google Gemini API key** *(optional — for direct Gemini routing, bypassing OpenRouter)*
+- **OpenAI API key** *(optional — for direct OpenAI routing)*
+
+**For Mode 2 (Portkey):**
+- **Portkey API key** — [app.portkey.ai](https://app.portkey.ai) → API Keys
+- **Provider API keys** — same Anthropic / OpenAI / Gemini keys you already have
+
+---
+
+## Setup
+
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/Bharath-Testsigma/POC-001.git
-cd POC-001/atto-poc
-cp .env.example .env
-docker compose up -d
-.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
-.venv/bin/streamlit run ui.py
+cd POC-001/castari-proxy/claude-agent-demo
+npm install
 ```
 
-Open:
+### 2. Configure environment
 
-- Streamlit UI: `http://localhost:8501`
-- FastAPI API: `http://localhost:8000`
-- LiteLLM health: `http://localhost:4000/health/liveliness`
+Create `.env.local` in `castari-proxy/claude-agent-demo/`:
 
-## Documentation
+```env
+# Always required
+ANTHROPIC_API_KEY=sk-ant-...
 
-- LiteLLM local guide: [atto-poc/README.md](./atto-poc/README.md)
-- LiteLLM local env template: [atto-poc/.env.example](./atto-poc/.env.example)
-- Cloudflare demo app guide: [castari-proxy/claude-agent-demo/README.md](./castari-proxy/claude-agent-demo/README.md)
+# Mode 1 — Cloudflare Worker URL (deploy steps below)
+CASTARI_WORKER_URL=https://atto-proxy.YOUR-SUBDOMAIN.workers.dev
 
-## Other Demo Branches
+# Mode 1 — additional provider keys (optional, enables those model groups)
+OPENROUTER_API_KEY=sk-or-v1-...
+GEMINI_API_KEY=AIza...
+OPENAI_API_KEY=sk-...
 
-### `demo/cloudflare`
+# Mode 2 — Portkey (enables the Portkey mode toggle in UI)
+PORTKEY_API_KEY=pk-...
+```
 
-- fixed to Cloudflare Worker mode
-- intended for a hosted demo with your own worker URL
-- supports Anthropic, OpenRouter, direct Gemini, direct OpenAI, and Ollama routes
+### 3. Deploy your Cloudflare Worker (Mode 1 only)
 
-### `demo/portkey`
+The Cloudflare Worker is the translation proxy for Mode 1. You deploy it to your own Cloudflare account — no third-party service.
 
-- fixed to Portkey mode
-- intended for a hosted demo using Portkey virtual keys
-- supports Anthropic, OpenAI, and Google through Portkey's managed gateway
+```bash
+cd ../worker
+npm install
+npx wrangler login          # opens browser — sign in to Cloudflare
+```
 
-## Validation Notes
+Edit `wrangler.toml` and replace the `account_id` with yours (find it in Cloudflare dashboard → Workers & Pages, right sidebar):
 
-This LiteLLM branch was smoke-tested locally with:
+```toml
+name = "atto-proxy"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+```
 
-- healthy LiteLLM container on `localhost:4000`
-- live FastAPI API on `localhost:8000`
-- successful `/generate` request producing XML test cases
-- successful fallback from Gemini quota exhaustion to `gpt-4o-mini`
+Deploy:
+
+```bash
+npx wrangler deploy
+# Deployed: https://atto-proxy.YOUR-SUBDOMAIN.workers.dev  ← paste into CASTARI_WORKER_URL
+```
+
+### 4. Start the app
+
+```bash
+cd ../claude-agent-demo
+npm run dev
+```
+
+Open **http://localhost:3000**
+
+> **Note:** `npm run dev` automatically runs `scripts/sync-castari-proxy.mjs` first, which copies the `queryCastari` source from `castari-proxy/src/` into `node_modules/castari-proxy`. This keeps the local package in sync without a publish step.
+
+---
 
 ## Using the App
 
