@@ -74,6 +74,42 @@ def _coerce_text(content: object) -> str:
     return ""
 
 
+def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
+    """Convert an OpenAI-style message list to Anthropic format, skipping system."""
+    out = []
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+        if role == "tool":
+            # OpenAI tool result → Anthropic tool_result content block inside a user turn
+            out.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.get("tool_call_id", ""),
+                    "content": m.get("content", ""),
+                }],
+            })
+        elif role == "assistant" and m.get("tool_calls"):
+            # OpenAI assistant with tool_calls → Anthropic tool_use content blocks
+            content = []
+            if m.get("content"):
+                content.append({"type": "text", "text": m["content"]})
+            for tc in m["tool_calls"]:
+                args = tc["function"].get("arguments", "{}")
+                content.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["function"]["name"],
+                    "input": json.loads(args) if isinstance(args, str) else args,
+                })
+            out.append({"role": "assistant", "content": content})
+        else:
+            out.append({"role": role, "content": m.get("content", "")})
+    return out
+
+
 def _route(model: str) -> str:
     """Return provider family: openai | anthropic | google."""
     m = model.lower()
@@ -108,6 +144,7 @@ async def _chat_completion(
     if provider == "anthropic":
         # Direct Anthropic messages API — gateway doesn't support Anthropic yet
         model_id = model.removeprefix("anthropic/")
+        anthropic_messages = _to_anthropic_messages(messages)
         response = await client.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -119,7 +156,7 @@ async def _chat_completion(
                 "model": model_id,
                 "max_tokens": 8192,
                 "system": next((m["content"] for m in messages if m["role"] == "system"), ""),
-                "messages": [m for m in messages if m["role"] != "system"],
+                "messages": anthropic_messages,
                 "tools": [
                     {
                         "name": t["function"]["name"],
@@ -130,6 +167,8 @@ async def _chat_completion(
                 ],
             },
         )
+        if not response.is_success:
+            logger.error(f"Anthropic API error {response.status_code}: {response.text}")
         response.raise_for_status()
         return _anthropic_to_openai(response.json(), model_id)
 
