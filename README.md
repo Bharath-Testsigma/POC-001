@@ -1,23 +1,14 @@
 # POC-001 — Portkey Demo Branch
 
-This branch is the dedicated **Portkey Gateway** version of the Atto proxy demo.
+`demo/portkey` is now a Portkey-only branch. It keeps the Next.js app plus the local `castari-proxy/src` interceptor package, but removes the Cloudflare worker code and Cloudflare-only setup.
 
 ## Branch Map
 
-| Branch | Mode | Stack |
+| Branch | Purpose | Stack |
 |---|---|---|
-| `demo/cloudflare` | Cloudflare Worker | Next.js + Claude Agent SDK + Cloudflare Worker |
-| `demo/portkey` | Portkey Gateway | Next.js + Claude Agent SDK + Portkey |
-| `demo/litellm-local` | LiteLLM Local | Streamlit + FastAPI + LiteLLM |
-
-You are currently on `demo/portkey`.
-
-## What This Mode Demonstrates
-
-- the app keeps a Claude-compatible SDK contract
-- Portkey acts as the managed gateway instead of a self-hosted worker
-- provider routing is controlled through `pk:provider/model` naming
-- Portkey virtual keys and gateway observability can be part of the demo story
+| `main` | local/self-hosted demo | Streamlit + FastAPI + LiteLLM |
+| `demo/portkey` | managed gateway demo | Next.js + Claude Agent SDK + Portkey |
+| `demo/cloudflare` | self-hosted gateway demo | Next.js + Claude Agent SDK + Cloudflare Worker |
 
 ## Architecture
 
@@ -26,7 +17,7 @@ Browser
   -> Next.js /api/generate
     -> Claude Agent SDK
       -> queryCastari fetch interceptor
-        -> local /api/portkey route
+        -> local /api/portkey/v1/messages
           -> Portkey Gateway
             -> Anthropic / OpenAI / Google
 ```
@@ -45,27 +36,17 @@ Open `http://localhost:3000`.
 
 ## Required Configuration
 
-Core values:
-
 - `ANTHROPIC_API_KEY`
 - `PORTKEY_API_KEY`
-
-Provider credentials used behind Portkey:
-
-- `OPENAI_API_KEY`
-- `GEMINI_API_KEY`
-- `ANTHROPIC_API_KEY`
-
-Demo pin:
-
+- `OPENAI_API_KEY` for OpenAI models through Portkey
+- `GEMINI_API_KEY` for Google models through Portkey
 - `NEXT_PUBLIC_ATTO_DEMO_MODE=portkey`
 
-## Documentation
+## Files Kept On This Branch
 
-- app guide: [castari-proxy/claude-agent-demo/README.md](./castari-proxy/claude-agent-demo/README.md)
-- Cloudflare variant: switch to `demo/cloudflare`
-- LiteLLM local variant: switch to `demo/litellm-local`
+- app: [castari-proxy/claude-agent-demo](./castari-proxy/claude-agent-demo)
+- interceptor package: [castari-proxy/src](./castari-proxy/src)
 
 ## Validation Notes
 
-This branch linted successfully locally. A full `next build` in this environment is blocked by Google Font fetches from `next/font`, not by the Portkey branch logic itself.
+This branch linted successfully locally. A full `next build` in this environment is blocked by Google Font fetches from `next/font`, not by Portkey routing logic.

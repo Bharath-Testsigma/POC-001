@@ -20,14 +20,16 @@ export type QueryPrompt = string | AsyncIterable<SDKMessage>;
 export function buildOptions(config: QueryRuntimeConfig = {}): CastariOptions {
   const policy = buildPolicy(config.mode ?? 'safe');
   const mcpServers = buildMcpServers();
+  const portkeyBaseUrl = `${process.env.NEXT_SERVER_URL ?? 'http://localhost:3000'}/api/portkey`;
   const envOverrides: Record<string, string> = {
     ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-    ANTHROPIC_BASE_URL: env.CASTARI_WORKER_URL,
-    CASTARI_GATEWAY_URL: env.CASTARI_WORKER_URL
+    ANTHROPIC_BASE_URL: portkeyBaseUrl,
+    CASTARI_GATEWAY_URL: portkeyBaseUrl
   };
 
-  if (env.OPENROUTER_API_KEY) envOverrides.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
-  if (env.CASTARI_WORKER_TOKEN) envOverrides.X_WORKER_TOKEN = env.CASTARI_WORKER_TOKEN;
+  if (env.PORTKEY_API_KEY) envOverrides.PORTKEY_API_KEY = env.PORTKEY_API_KEY;
+  if (env.OPENAI_API_KEY) envOverrides.OPENAI_API_KEY = env.OPENAI_API_KEY;
+  if (env.GEMINI_API_KEY) envOverrides.GEMINI_API_KEY = env.GEMINI_API_KEY;
   if (env.CASTARI_SUBAGENT_MODEL) envOverrides.CASTARI_SUBAGENT_MODEL = env.CASTARI_SUBAGENT_MODEL;
 
   const options: Options = {
@@ -35,7 +37,7 @@ export function buildOptions(config: QueryRuntimeConfig = {}): CastariOptions {
     executable: 'node',
     executableArgs: [],
     env: envOverrides,
-    model: config.model ?? env.CLAUDE_MODEL ?? 'claude-sonnet-4-5-20250929',
+    model: config.model ?? env.CLAUDE_MODEL ?? 'pk:anthropic/claude-haiku-4-5-20251001',
     permissionMode: env.AGENT_PERMISSION_MODE ?? 'default',
     includePartialMessages: env.AGENT_ENABLE_PARTIALS === 'true',
     allowedTools: policy.allowedTools,

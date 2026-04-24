@@ -1,10 +1,6 @@
 # Atto — AI Test Case Generator (Next.js App)
 
-This branch is the dedicated **Portkey demo deployment**. The UI is locked to Portkey mode so this branch can be deployed as a single-purpose showcase.
-
-Portkey is the only active routing path in this branch. Cloudflare Worker deployment is not part of this demo variant.
-
-This is the main application. It uses the **Claude Agent SDK** with a self-hosted proxy to generate XML test case files from plain-English prompts, with support for any AI model — Claude, Gemini, GPT-4o, Llama, and more.
+This branch is the dedicated **Portkey demo deployment**. The app is fixed to the Portkey routing path and no longer includes Cloudflare Worker setup.
 
 ## What This Branch Is For
 
@@ -12,26 +8,6 @@ This is the main application. It uses the **Claude Agent SDK** with a self-hoste
 - showing Portkey virtual-key routing across Anthropic, OpenAI, and Google
 - keeping the same orchestration/UI layer while swapping the gateway
 - presenting gateway observability and routing governance as the core value proposition
-
-For demo deployments, you can pin the UI to a single proxy path with:
-
-```env
-NEXT_PUBLIC_ATTO_DEMO_MODE=cloudflare
-```
-
-or
-
-```env
-NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
-```
-
-When that variable is set, the sidebar shows a fixed mode badge and hides the runtime toggle so each deployment can represent one clean architecture story.
-
-For this branch, keep it set to:
-
-```env
-NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
-```
 
 ## Quick Start
 
@@ -54,7 +30,7 @@ GEMINI_API_KEY=AIza...
 NEXT_PUBLIC_ATTO_DEMO_MODE=portkey
 ```
 
-`CASTARI_WORKER_URL` is not part of this demo path. The Portkey route is handled through the local `/api/portkey` endpoint and forwarded to `https://api.portkey.ai/v1/messages`.
+The Portkey path is handled through the local `/api/portkey/v1/messages` route, which forwards requests to `https://api.portkey.ai/v1/messages`.
 
 ## Project Layout
 
@@ -112,7 +88,7 @@ Claude Agent SDK — query()
 [Every fetch to /v1/messages is intercepted]
         │
         ▼
-Local /api/portkey route
+Local /api/portkey/v1/messages route
   Resolves provider from pk: prefix
   Forwards request to Portkey Gateway
         │
@@ -166,20 +142,9 @@ This is why the agent reliably produces structured output instead of freeform te
 
 ## Adding New Models
 
-Edit `lib/agent/atto-config.ts`:
+Edit `lib/agent/atto-config.ts` and add a new `pk:provider/model` entry to `PORTKEY_MODEL_OPTIONS`.
 
-```typescript
-export const ATTO_MODEL_OPTIONS = [
-  // Anthropic models — use model name directly
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'Anthropic' },
-
-  // Any OpenRouter model — prefix with "or:"
-  { value: 'or:google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },
-  { value: 'or:cohere/command-r-plus', label: 'Command R+', provider: 'Cohere' },
-];
-```
-
-No other code changes needed. The routing is handled automatically by the model prefix.
+No other code changes are needed. Routing is inferred from the `pk:` model prefix.
 
 ## Deployment Checklist
 
