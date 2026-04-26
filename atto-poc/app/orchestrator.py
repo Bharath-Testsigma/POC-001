@@ -94,9 +94,16 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                 tool_choice="auto",
                 api_base=settings.litellm_proxy_url,
                 api_key=settings.litellm_master_key,
+                timeout=60,
             )
         except Exception as primary_err:
-            logger.warning(f"Model {active_model} failed: {primary_err}. Trying fallback.")
+            status_code = getattr(primary_err, "status_code", None)
+            if status_code and 400 <= status_code < 500:
+                logger.error(
+                    f"Model {active_model} returned {status_code} — not retrying: {primary_err}"
+                )
+                raise
+            logger.warning(f"Model {active_model} failed ({status_code or 'network'}). Trying fallback.")
             try:
                 response = await litellm.acompletion(
                     model=settings.fallback_model,
@@ -105,6 +112,7 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                     tool_choice="auto",
                     api_base=settings.litellm_proxy_url,
                     api_key=settings.litellm_master_key,
+                    timeout=60,
                 )
                 active_model = settings.fallback_model
             except Exception as fallback_err:
