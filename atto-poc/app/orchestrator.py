@@ -168,8 +168,6 @@ async def run_orchestrator(request: GenerateRequest) -> GenerateResponse:
                 })
                 continue
 
-            tracer.log_tool_call(tool_name, args, "")
-
             try:
                 # Pre-hooks
                 if tool_name == "DeleteFile":
